@@ -2133,12 +2133,8 @@ const app = createApp({
             if (!button) return;
             event.preventDefault();
             event.stopPropagation();
-            if (isConversationBusy.value) {
-                showToast('请等待当前回复完成后再重新生成图片', 'warning');
-                return;
-            }
-
             const card = button.closest('.generated-image-card');
+            if (card.classList.contains('is-rerolling')) return;
             const cards = [...event.currentTarget.querySelectorAll('.generated-image-card')];
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
@@ -2146,7 +2142,6 @@ const app = createApp({
             const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
-            if (card.classList.contains('is-rerolling')) return;
 
             let tags = imageMatch[1].split(',').map(tag => tag.trim()).filter(Boolean);
             if (tags.length < 2) {
