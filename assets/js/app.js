@@ -9166,6 +9166,40 @@ const app = createApp({
             inputBox.value?.focus();
         };
 
+        // Handle Android back button: close overlays level by level
+        window.RPHubBack = () => {
+            const overlays = [
+                showStoryBranchNameEditor,
+                showStoryBranchModal,
+                showCharacterExportModal,
+                showExportModal,
+                showContextViewerModal,
+                showActiveToolEditor,
+                showWorldInfoEditor,
+                showRegexEditor,
+                showUiTemplateEditor,
+                showPresetEditor,
+                showCharacterEditor,
+                showModelSelector,
+                showAutoImageGenModal,
+                showUserSetupModal,
+                showNoMemoryNeededModal,
+                showConfirmModal,
+                showAddCharacterMenu,
+                showApiProviderSelector,
+                showChatModelSelector,
+                showInstructionPanel,
+                showDescriptionPanel
+            ];
+            for (const overlay of overlays) {
+                if (overlay.value) {
+                    overlay.value = false;
+                    return true;
+                }
+            }
+            return false;
+        };
+
         // Lifecycle
         onMounted(async () => {
             document.addEventListener('fullscreenchange', syncChatFullscreenState);

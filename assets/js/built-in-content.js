@@ -76,7 +76,7 @@ year 2025, textless version, {{petite,loli}}, Petite figure, no text, The image 
         String(writingStylePrompt || '').trim(),
         '按系统中当前启用的人称、时间戳、NSFW及输出格式执行。',
         autoImageGenEnabled
-            ? `当前已开启自动生图，请按系统中的自动生图规则生成并插入${Math.min(8, Math.max(2, Number(imageGenCount) || 2))}张图片。`
+            ? `当前已开启自动生图，请按系统中的自动生图规则生成并插入${Math.min(8, Math.max(1, Number(imageGenCount) || 2))}张图片。`
             : '',
         uiTemplateEnabled
             ? '正文结束后，按系统提供的当前变量JSON检查并输出本轮需要更新的变量。'
