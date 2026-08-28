@@ -15,6 +15,7 @@
     <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
     <script src="../assets/js/built-in-content.js"></script>
     <script src="../assets/js/core-utils.js"></script>
+    <script src="../assets/js/api-utils.js"></script>
     <style>
         :root {
             --app-visual-height: 100vh;
@@ -1790,8 +1791,7 @@
                     stream: true
                 });
                 const getApiBaseUrl = () => {
-                    const baseUrl = api.url.replace(/\/+$/, '');
-                    return baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+                    return window.RPHubApiUtils.buildApiEndpoint(api.url, '');
                 };
                 const requestWorkshopCompletion = (messages, { stream, temperature }) => {
                     if (!String(api.url || '').trim()) throw new Error('请先填写当前 API 预设的地址');
@@ -3946,6 +3946,25 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                 };
 
                 const downloadFile = (blob, filename) => {
+                    const native = window.RoleplayHubNative || (window.parent && window.parent.RoleplayHubNative);
+                    if (native && typeof native.saveFile === 'function') {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64 = reader.result.split(',')[1];
+                            const mime = blob.type || 'application/octet-stream';
+                            try {
+                                native.saveFile(base64, filename, mime);
+                                showToast('已调用系统保存文件', 'success');
+                            } catch (e) {
+                                cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });
+                            }
+                        };
+                        reader.onerror = () => {
+                            cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });
+                        };
+                        reader.readAsDataURL(blob);
+                        return;
+                    }
                     cardUtils.downloadBlob(blob, filename, { targetBlank: true, revokeDelay: 2000 });
                 };
 

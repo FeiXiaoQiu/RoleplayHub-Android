@@ -1955,6 +1955,17 @@
                    });
                 };
                 
+                const fallbackDownloadBlob = (blob, filename) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                };
+
                 // 导出书籍功能
                 const exportBook = () => {
                    if (chapters.value.length === 0) {
@@ -1994,14 +2005,24 @@
                     }
                     
                     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `${novel.value.title || '小说导出'}.txt`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
+                    const filename = `${novel.value.title || '小说导出'}.txt`;
+                    const native = window.RoleplayHubNative || (window.parent && window.parent.RoleplayHubNative);
+                    if (native && typeof native.saveFile === 'function') {
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                            const base64 = reader.result.split(',')[1];
+                            try {
+                                native.saveFile(base64, filename, 'text/plain;charset=utf-8');
+                                showToast('已调用系统保存文件', 'success');
+                            } catch (e) {
+                                fallbackDownloadBlob(blob, filename);
+                            }
+                        };
+                        reader.onerror = () => fallbackDownloadBlob(blob, filename);
+                        reader.readAsDataURL(blob);
+                    } else {
+                        fallbackDownloadBlob(blob, filename);
+                    }
                     showToast('小说已开始导出', 'success');
                 };
 
