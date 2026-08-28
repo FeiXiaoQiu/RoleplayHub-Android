@@ -2,7 +2,7 @@
 (function () {
     const buildApiEndpoint = (baseUrl, path) => {
         const root = String(baseUrl || '').replace(/\/+$/, '');
-        const apiRoot = /\/v\d+(\.\d+)?$/i.test(root) ? root : `${root}/v1`;
+        const apiRoot = /\/v1$/i.test(root) ? root : `${root}/v1`;
         return `${apiRoot}/${String(path || '').replace(/^\/+/, '')}`;
     };
 

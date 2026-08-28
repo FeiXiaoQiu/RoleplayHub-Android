@@ -300,9 +300,9 @@
         { view: 'characters', label: '角色卡管理', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' }
     ]);
     const onlineItems = Object.freeze([
-        { view: 'generator', label: '角色卡生成', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-        { view: 'square', label: '万相广场', square: true },
-        { view: 'novel', label: '墨韵·造梦', icon: 'M20 19V16H7C5.34315 16 4 17.3431 4 19M8.8 22H16.8C17.9201 22 18.4802 22 18.908 21.782C19.2843 21.5903 19.5903 21.2843 19.782 20.908C20 20.4802 20 19.9201 20 18.8V5.2C20 4.07989 20 3.51984 19.782 3.09202C19.5903 2.71569 19.2843 2.40973 18.908 2.21799C18.4802 2 17.9201 2 16.8 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z' }
+        { view: 'generator', label: '角色卡生成', icon: 'M15 8a3 3 0 11-6 0 3 3 0 016 0zm-3 5c-4 0-7 2-7 5v1h8m5-6v6m-3-3h6' },
+        { view: 'novel', label: '小说生成', icon: 'M20 19V16H7C5.34315 16 4 17.3431 4 19M8.8 22H16.8C17.9201 22 18.4802 22 18.908 21.782C19.2843 21.5903 19.5903 21.2843 19.782 20.908C20 20.4802 20 19.9201 20 18.8V5.2C20 4.07989 20 3.51984 19.782 3.09202C19.5903 2.71569 19.2843 2.40973 18.908 2.21799C18.4802 2 17.9201 2 16.8 2H8.8C7.11984 2 6.27976 2 5.63803 2.32698C5.07354 2.6146 4.6146 3.07354 4.32698 3.63803C4 4.27976 4 5.11984 4 6.8V17.2C4 18.8802 4 19.7202 4.32698 20.362C4.6146 20.9265 5.07354 21.3854 5.63803 21.673C6.27976 22 7.11984 22 8.8 22Z' },
+        { view: 'square', label: '万相广场', square: true }
     ]);
     const advancedItems = Object.freeze([
         { view: 'presets', label: '预设', icon: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4M6 18a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' },
@@ -323,7 +323,7 @@
         },
         emits: ['update:current-view', 'update:collapsed', 'toggle-online', 'toggle-advanced', 'close-mobile'],
         setup(props, { emit }) {
-            const { online } = window.RPHubPresence.usePresence();
+            window.RPHubUpdateCheck.useUpdateCheck();
             const selectView = (view) => {
                 emit('update:current-view', view);
                 emit('close-mobile');
@@ -336,7 +336,6 @@
                 advancedViews: advancedItems.map(item => item.view),
                 itemClass,
                 onlineItems,
-                online,
                 onlineViews: onlineItems.map(item => item.view),
                 primaryItems,
                 selectView
@@ -457,10 +456,7 @@
                         </div>
                         <div v-if="!collapsed" class="ml-3 whitespace-nowrap overflow-hidden">
                             <div class="text-sm font-bold text-gray-900 truncate">{{ user.name }}</div>
-                            <div class="flex items-center gap-1.5 text-xs text-gray-500">
-                                <span v-if="online !== null" class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
-                                <span>{{ online === null ? 'User' : online + ' 人在线' }}</span>
-                            </div>
+                            <div class="text-xs text-gray-500">User</div>
                         </div>
                     </div>
                 </div>
@@ -617,6 +613,132 @@
                     </svg>
                 </button>
             </div>`
+    };
+
+    const UpdateNotificationModal = {
+        props: {
+            update: { type: Object, required: true },
+            renderMarkdown: { type: Function, required: true }
+        },
+        setup(props, { expose }) {
+            const show = ref(false);
+            const countdown = ref(0);
+            const scrolledToBottom = ref(false);
+            const contentEl = ref(null);
+            const remoteUpdateId = ref(null);
+            const pendingRemoteUpdateId = ref(null);
+            let countdownTimer = null;
+            let countdownEndsAt = 0;
+            let layoutTimer = null;
+
+            const clearTimers = () => {
+                clearInterval(countdownTimer);
+                clearTimeout(layoutTimer);
+                countdownTimer = null;
+                layoutTimer = null;
+            };
+            const startCountdown = () => {
+                clearInterval(countdownTimer);
+                countdownEndsAt = Date.now() + 10_000;
+                const updateCountdown = () => {
+                    countdown.value = Math.max(0, Math.ceil((countdownEndsAt - Date.now()) / 1000));
+                    if (countdown.value > 0) return;
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                };
+                updateCountdown();
+                countdownTimer = setInterval(updateCountdown, 250);
+            };
+            const showRemoteUpdate = (versionId) => {
+                clearTimers();
+                remoteUpdateId.value = versionId;
+                pendingRemoteUpdateId.value = null;
+                countdown.value = 0;
+                scrolledToBottom.value = true;
+                show.value = true;
+            };
+            const handleRemoteUpdate = (event) => {
+                const versionId = Number(event?.detail?.versionId);
+                if (!Number.isInteger(versionId) || versionId < 10000 || versionId > 99999
+                    || versionId <= Number(props.update.id)) return;
+                if (remoteUpdateId.value !== null) {
+                    remoteUpdateId.value = Math.max(remoteUpdateId.value, versionId);
+                } else if (show.value) {
+                    pendingRemoteUpdateId.value = Math.max(pendingRemoteUpdateId.value || 0, versionId);
+                } else {
+                    showRemoteUpdate(versionId);
+                }
+            };
+            const check = () => {
+                if (remoteUpdateId.value !== null || pendingRemoteUpdateId.value !== null) return;
+                const lastId = Number.parseInt(localStorage.getItem('roleplay_hub_update_id'), 10);
+                if (Number.isFinite(lastId) && lastId >= props.update.id) return;
+
+                show.value = true;
+                scrolledToBottom.value = false;
+                startCountdown();
+                layoutTimer = setTimeout(() => {
+                    const element = contentEl.value;
+                    if (element && element.scrollHeight <= element.clientHeight + 10) {
+                        scrolledToBottom.value = true;
+                    }
+                }, 100);
+            };
+            const close = () => {
+                if (countdown.value > 0) return;
+                show.value = false;
+                clearTimers();
+                remoteUpdateId.value = null;
+                localStorage.setItem('roleplay_hub_update_id', String(props.update.id));
+                if (pendingRemoteUpdateId.value !== null) {
+                    const versionId = pendingRemoteUpdateId.value;
+                    layoutTimer = setTimeout(() => showRemoteUpdate(versionId), 150);
+                }
+            };
+            const handleScroll = (event) => {
+                const element = event.target;
+                scrolledToBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 10;
+            };
+
+            window.addEventListener('rphub:update-available', handleRemoteUpdate);
+            expose({ check });
+            onBeforeUnmount(() => {
+                clearTimers();
+                window.removeEventListener('rphub:update-available', handleRemoteUpdate);
+            });
+            return { contentEl, countdown, handleScroll, close, remoteUpdateId, scrolledToBottom, show };
+        },
+        template: `
+            <modal-shell v-if="show" overlay-class="z-[80] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+                panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden relative">
+                    <div class="bg-gradient-to-r from-primary-50 to-purple-50 p-4 border-b border-gray-100">
+                        <div class="flex items-center gap-3">
+                            <h3 class="text-xl font-bold text-gray-900">{{ remoteUpdateId ? '发现新版本' : update.title }}</h3>
+                            <span class="bg-primary-100 text-primary-600 text-[10px] font-bold px-2 py-0.5 rounded-full border border-primary-200 transform translate-y-0.5">New</span>
+                        </div>
+                    </div>
+                    <div ref="contentEl" class="p-4 max-h-[75vh] overflow-y-auto custom-scrollbar update-content" @scroll="handleScroll">
+                        <div v-if="remoteUpdateId" class="py-6 text-center">
+                            <p class="text-lg font-bold text-gray-800">发现新版本，手动刷新页面后更新</p>
+                        </div>
+                        <div v-else class="prose prose-sm prose-gray max-w-none">
+                            <div class="markdown-body" v-html="renderMarkdown(update.content, 'assistant', true)"></div>
+                        </div>
+                        <div class="mt-8 mb-2 flex justify-end">
+                            <button @click="close" :disabled="!remoteUpdateId && countdown > 0"
+                                :class="{ 'opacity-50 cursor-not-allowed': !remoteUpdateId && countdown > 0 }"
+                                class="px-10 py-2.5 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg shadow-sm hover:shadow transition-all active:scale-95">
+                                知道了 <span v-if="!remoteUpdateId && countdown > 0">({{ countdown }}s)</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div v-show="!remoteUpdateId && !scrolledToBottom" class="absolute bottom-0 left-0 right-0 pt-12 pb-4 bg-gradient-to-t from-white via-white/80 to-transparent flex justify-center items-end pointer-events-none transition-opacity duration-300 rounded-b-xl">
+                        <div class="text-xs text-blue-500 flex items-center gap-1 animate-bounce bg-white shadow-sm border border-blue-100 px-3 py-1.5 rounded-full">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                            向下滑动查看完整内容
+                        </div>
+                    </div>
+            </modal-shell>`
     };
 
     const StatusNoticeModal = {
@@ -1786,7 +1908,8 @@
                 return `${Number((value / 1000).toFixed(1))}s`;
             };
             const formatOutputSpeed = (record) => {
-                if (!Number.isFinite(record?.durationMs) || record.durationMs <= 0
+                if (record?.isStream !== true
+                    || !Number.isFinite(record?.durationMs) || record.durationMs <= 0
                     || !Number.isFinite(record?.outputCharacters) || record.outputCharacters <= 0) return '--';
                 return `${Math.round(record.outputCharacters * 1000 / record.durationMs)}字/s`;
             };
@@ -1878,7 +2001,7 @@
                             <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3">
                                 <div class="flex min-w-0 items-center gap-3 text-xs text-gray-400">
                                     <span>耗时 {{ formatDuration(record.durationMs) }}</span>
-                                    <span>速度 {{ formatOutputSpeed(record) }}</span>
+                                    <span v-if="record.isStream === true">速度 {{ formatOutputSpeed(record) }}</span>
                                 </div>
                                 <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
                             </div>
@@ -2454,6 +2577,7 @@
         TokenUsageView,
         UiTemplatesView,
         UiTemplateEditorModal,
+        UpdateNotificationModal,
         UserSetupModal,
         UiTemplatePending,
         WorldInfoEditorModal
