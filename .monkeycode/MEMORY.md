@@ -80,6 +80,6 @@ Entries discovered by the Agent during task execution should follow this format:
 - Context: 绑定 GitHub 远程仓库后
 - Category: Workflow & Collaboration
 - Instructions:
-  - 远程仓库：`git@github.com:FeiXiaoQiu/11aa3.git`（origin），本地 `master` 对应远程 `main`。
+  - 远程仓库：`git@github.com:FeiXiaoQiu/RoleplayHub-Android.git`（origin），本地 `master` 对应远程 `main`。
   - 推送走 SSH over 443：SSH config 已配 `Host github.com → ssh.github.com:443`，私钥 `~/.ssh/id_ed25519_rphub`，GitHub 部署密钥（含写权限）已生效，不使用 token。
   - 发布流程：先本地构建验证（无问题）→ 再触发 GitHub Actions 工作流构建 → 发 release。

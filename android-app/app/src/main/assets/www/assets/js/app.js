@@ -3,6 +3,7 @@ const { useStorageManagement, useTokenUsage } = window.RPHubComposables;
 const { createMessageRenderer } = window.RPHubMessageRenderer;
 const { AppSidebar } = window.RPHubLayoutComponents;
 const { requestChatCompletion } = window.RPHubApiClient;
+const { buildApiEndpoint } = window.RPHubApiUtils;
 const {
     ActionConfirmModal,
     ActiveToolEditorModal,
@@ -108,7 +109,7 @@ const {
     inferInitialUiTemplateState,
     normalizeUiTemplate,
     normalizeUiTemplateUpdateList,
-    parseUiTemplateUpdateJson,
+    parseUiTemplateUpdates,
     renderUiTemplateHtml,
     sanitizeUiTemplateImportEntry,
     setUiTemplateValue,
@@ -133,10 +134,7 @@ const {
     setStoredValue,
     unwrapForStorage
 } = window.RPHubStorage;
-const {
-    prompts: BUILTIN_PROMPTS,
-    summaryLengthRequirements: SUMMARY_LENGTH_REQUIREMENTS
-} = window.RPHubBuiltinContent;
+const { prompts: BUILTIN_PROMPTS } = window.RPHubBuiltinContent;
 const {
     activeTools: activeToolConfig,
     apiProviderOptions,
@@ -160,6 +158,23 @@ marked.use({
     }
 });
 
+const RollingText = {
+    props: { value: { type: [String, Number], default: '' } },
+    setup(props) {
+        const text = computed(() => String(props.value ?? ''));
+        const characters = computed(() => Array.from(text.value));
+        return { characters, text };
+    },
+    template: `
+        <span class="inline-flex" :aria-label="text">
+            <span v-for="(character, index) in characters" :key="index" class="inline-grid overflow-hidden">
+                <transition name="usage-roll" appear>
+                    <span :key="character" class="col-start-1 row-start-1" aria-hidden="true">{{ character }}</span>
+                </transition>
+            </span>
+        </span>`
+};
+
 const app = createApp({
     components: {
         ActionConfirmModal,
@@ -180,6 +195,7 @@ const app = createApp({
         PresetEditorModal,
         RegexEditorModal,
         RetryConfirmModal,
+        RollingText,
         SettingsHelp,
         SettingsPageHeader,
         StatusNoticeModal,
@@ -206,7 +222,6 @@ const app = createApp({
             uiTemplatePlacements: uiTemplatePlacementOptions,
             worldInfoPositions: worldInfoPositionOptions
         } = uiOptions;
-        const ACTIVE_TOOL_VECTOR_TYPE = activeToolConfig.types.vector;
         const ACTIVE_TOOL_KEYWORD_TYPE = activeToolConfig.types.keyword;
         const ACTIVE_TOOL_WEB_TYPE = activeToolConfig.types.web;
         const ACTIVE_TOOL_MIN_RESULT_COUNT = activeToolConfig.resultCount.min;
@@ -223,7 +238,6 @@ const app = createApp({
         const ACTIVE_TOOL_TAVILY_EXTRACT_ENDPOINT = activeToolConfig.tavily.extractEndpoint;
         const ACTIVE_TOOL_TAVILY_SEARCH_DEPTH = activeToolConfig.tavily.searchDepth;
         const ACTIVE_TOOL_TAVILY_EXTRACT_MAX_URLS = ACTIVE_TOOL_DEFAULT_RESULT_COUNT;
-        const createDefaultActiveTool = () => ({ ...activeToolConfig.defaults[0] });
         const getDefaultActiveToolDefinitions = () => activeToolConfig.defaults.map(tool => ({ ...tool }));
 
         // --- State ---
@@ -234,6 +248,7 @@ const app = createApp({
             onConfirm: null,
             onCancel: null
         });
+
         const showVueConfirmModal = (title, message) => {
             return new Promise((resolve) => {
                 globalConfirmModal.value = {
@@ -349,6 +364,7 @@ const app = createApp({
         let activeToolQueueAbortController = null;
         const abortController = ref(null);
         const userInput = ref('');
+        const pendingCardInteraction = ref('');
         const pendingChatImages = ref([]);
         const pendingChatImageReadCount = ref(0);
         let chatImageSelectionEpoch = 0;
@@ -379,7 +395,9 @@ const app = createApp({
                 scrollRevealObserver = new IntersectionObserver((entries) => {
                     entries.forEach(entry => {
                         if (entry.isIntersecting) {
+                            entry.target.dataset.revealed = 'true';
                             entry.target.classList.add('reveal-active');
+                            scrollRevealObserver.unobserve(entry.target);
                         }
                     });
                 }, {
@@ -394,7 +412,7 @@ const app = createApp({
             if (!scrollRevealObserver) initScrollReveal();
             if (scrollRevealObserver && newEls) {
                 newEls.forEach(el => {
-                    if (el instanceof HTMLElement && !el.classList.contains('reveal-active')) {
+                    if (el instanceof HTMLElement && el.dataset.revealed !== 'true' && !el.classList.contains('reveal-active')) {
                         scrollRevealObserver.observe(el);
                     }
                 });
@@ -596,6 +614,8 @@ const app = createApp({
 
             useCharacterBackground: true,
             immersiveMode: false,
+            showLatestUsageBar: false,
+            styleFilterEnabled: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -935,15 +955,46 @@ const app = createApp({
             if (role === 'assistant') return 'bg-purple-100 text-purple-700 border-purple-200';
             return 'bg-red-100 text-red-700 border-red-200';
         };
-        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const blockedStyleSentencePattern = /[^。！？!?\n]*(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:指尖|指节|指关节)[^。！？!?\n]*(?:发白|泛白)|像(?:是)?[^。！？!?\n]*?[，,]\s*又像(?:是)?|不是[^。！？!?\n]*?(?:而是|就是|[，,]\s*(?:是|(?:更|倒|反倒)?像是)))[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/g;
+        const standaloneWordCountSentencePattern = /(^|[。！？!?\n]+[”’」』】）)]*)[ \t]*(?:\*\*|__)?(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字[^。！？!?\n]*(?:[。！？!?]+[”’」』】）)]*(?:\*\*|__)?)?/gm;
         const paleFingerClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n]*(?:指尖|指节|指关节)[^，,。！？!?；;\n]*(?:发白|泛白)[^，,。！？!?；;\n]*(?=$|[，,。！？!?；;\n])/gm;
+        const blockedStyleClausePattern = /(?:^|[，,；;])[^，,。！？!?；;\n*_]*(?:微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种)[^，,。！？!?；;\n*_]*(?=(?:\*\*|__)?[ \t]*(?:$|[，,。！？!?；;\n]))/gm;
         const blockedStyleWordPattern = /极其/g;
         const quotedDialoguePattern = /(“[\s\S]*?”|『[\s\S]*?』|"[\s\S]*?")/g;
         const standaloneRenderedContentPattern = /^(?:\s|<!--[\s\S]*?-->)*(?:```|<!doctype\b|<\?xml\b|<html\b|<(?:head|body|style|script|template|svg|canvas|iframe|div|section|article|aside|header|footer|main|nav|form|table|ul|ol|pre|p|img)\b)/i;
         const isStandaloneRenderedContent = text => standaloneRenderedContentPattern.test(String(text || ''));
         const loggedBlockedStyleFragments = new Set();
-        const filterBlockedStyleText = (text, { log = false } = {}) => {
+        const openStyleFilterMessageKey = ref('');
+        const getStyleFilterMessageKey = (message, index) => String(message?.id || `message-${index}`);
+        const isStyleFilterDetailsOpen = (message, index) => (
+            openStyleFilterMessageKey.value === getStyleFilterMessageKey(message, index)
+        );
+        const toggleStyleFilterDetails = (message, index) => {
+            const key = getStyleFilterMessageKey(message, index);
+            openStyleFilterMessageKey.value = openStyleFilterMessageKey.value === key ? '' : key;
+        };
+        const normalizeStyleFilterHit = fragment => String(fragment || '')
+            .trim()
+            .replace(/^[，,；;]\s*/, '')
+            .replace(/^(?:\*\*|__)/, '')
+            .replace(/(?:\*\*|__)$/, '')
+            .trim();
+        const styleFilterHighlightPattern = /(?:不容置疑|(?:不易|难以)(?:察觉|觉察)|(?:微|几)不可察|一抹|弧度|生理性|微微泛|因为用力|像在|风箱|手术刀|上扬|带着一种|语气很平|声音很平|(?:\d+|[零〇一二两三四五六七八九十百千万]+)个字|指尖|指节|指关节|发白|泛白|不是|而是|就是|又像(?:是)?|(?:更|倒|反倒)?像是|极其)/g;
+        const getStyleFilterHitSegments = fragment => {
+            const text = String(fragment || '');
+            const segments = [];
+            let lastIndex = 0;
+            for (const match of text.matchAll(styleFilterHighlightPattern)) {
+                if (match.index > lastIndex) segments.push({ text: text.slice(lastIndex, match.index), matched: false });
+                segments.push({ text: match[0], matched: true });
+                lastIndex = match.index + match[0].length;
+            }
+            if (lastIndex < text.length) segments.push({ text: text.slice(lastIndex), matched: false });
+            return segments.length ? segments : [{ text, matched: false }];
+        };
+        const filterBlockedStyleText = (text, { log = false, collect = null } = {}) => {
             const source = String(text || '');
+            if (!settings.styleFilterEnabled) return source;
             if (isStandaloneRenderedContent(source)) return source;
             const removedFragments = [];
             const updateBlock = findUiTemplateUpdateBlock(source);
@@ -951,8 +1002,13 @@ const app = createApp({
             const filtered = cardUtils.transformUnprotectedText(source.slice(0, filterEnd), part => part
                 .split(quotedDialoguePattern)
                 .map((fragment, index) => index % 2 ? fragment : fragment
+                    .replace(standaloneWordCountSentencePattern, (match, prefix = '') => {
+                        removedFragments.push(match.slice(prefix.length).trim());
+                        return prefix;
+                    })
                     .replace(blockedStyleSentencePattern, match => { removedFragments.push(match.trim()); return ''; })
                     .replace(paleFingerClausePattern, match => { removedFragments.push(match.trim()); return ''; })
+                    .replace(blockedStyleClausePattern, match => { removedFragments.push(match.trim()); return ''; })
                     .replace(blockedStyleWordPattern, match => { removedFragments.push(match); return ''; })
                     .replace(/^[ \t]*[，,；;]+/gm, '')
                     .replace(/[，,；;]{2,}/g, marks => marks.at(-1))
@@ -960,6 +1016,9 @@ const app = createApp({
                     .replace(/[ \t]+\n/g, '\n')
                     .replace(/\n{3,}/g, '\n\n'))
                 .join(''));
+            if (Array.isArray(collect)) {
+                collect.push(...removedFragments.map(normalizeStyleFilterHit).filter(Boolean));
+            }
             if (log) {
                 const newFragments = removedFragments.filter(fragment => fragment && !loggedBlockedStyleFragments.has(fragment));
                 newFragments.forEach(fragment => loggedBlockedStyleFragments.add(fragment));
@@ -1028,9 +1087,7 @@ const app = createApp({
         const MEMORY_VECTOR_MIN_TOP_K = 10;
         const MEMORY_VECTOR_MAX_TOP_K = 20;
         const MEMORY_VECTOR_DEFAULT_TOP_K = 10;
-        const MEMORY_VECTOR_MIN_SIMILARITY = 40;
-        const MEMORY_VECTOR_MAX_SIMILARITY = 65;
-        const MEMORY_VECTOR_DEFAULT_SIMILARITY = 50;
+        const MEMORY_VECTOR_SIMILARITY_THRESHOLD = 45;
         const MEMORY_VECTOR_DEFAULT_DEPTH = 1;
         const CLASSIC_MEMORY_MIN_CONCURRENCY = 1;
         const CLASSIC_MEMORY_MAX_CONCURRENCY = 10;
@@ -1045,7 +1102,6 @@ const app = createApp({
         const SUMMARY_KEEP_FLOORS_MIN = 10;
         const SUMMARY_KEEP_FLOORS_MAX = 40;
         const SUMMARY_KEEP_FLOORS_DEFAULT = 20;
-        const SUMMARY_LEVEL_DEFAULT = 'balanced';
         const LIST_PAGE_SIZE = 10;
         const memories = ref([]);
         const classicMemories = ref([]);
@@ -1056,11 +1112,8 @@ const app = createApp({
             embeddingModel: '',
             classicModel: '',
             vectorTopK: MEMORY_VECTOR_DEFAULT_TOP_K,
-            similarityThreshold: MEMORY_VECTOR_DEFAULT_SIMILARITY,
-            defaultDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
             vectorKeepFloors: VECTOR_KEEP_FLOORS_DEFAULT,
             summaryKeepFloors: SUMMARY_KEEP_FLOORS_DEFAULT,
-            summaryLevel: SUMMARY_LEVEL_DEFAULT,
             classicConcurrency: CLASSIC_MEMORY_DEFAULT_CONCURRENCY
         });
         const isBatchExtracting = ref(false);
@@ -1125,7 +1178,7 @@ const app = createApp({
             if (!memorySettings.classicModel && memorySettings.model) {
                 memorySettings.classicModel = String(memorySettings.model).trim();
             }
-            ['model', 'autoExtract', 'keepFloors', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
+            ['model', 'autoExtract', 'keepFloors', 'similarityThreshold', 'summaryLevel', 'defaultDepth', `re${'rankEnabled'}`, `re${'rankModel'}`].forEach(key => {
                 delete memorySettings[key];
             });
             memorySettings.mode = memorySettings.mode === MEMORY_MODE_CLASSIC
@@ -1146,19 +1199,11 @@ const app = createApp({
                 SUMMARY_KEEP_FLOORS_MAX,
                 SUMMARY_KEEP_FLOORS_DEFAULT
             );
-            if (!SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]) {
-                memorySettings.summaryLevel = SUMMARY_LEVEL_DEFAULT;
-            }
             memorySettings.classicConcurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             const vectorTopK = Number(memorySettings.vectorTopK);
             memorySettings.vectorTopK = Number.isFinite(vectorTopK)
                 ? Math.max(MEMORY_VECTOR_MIN_TOP_K, Math.min(MEMORY_VECTOR_MAX_TOP_K, vectorTopK))
                 : MEMORY_VECTOR_DEFAULT_TOP_K;
-            const similarityThreshold = Number(memorySettings.similarityThreshold);
-            memorySettings.similarityThreshold = Number.isFinite(similarityThreshold)
-                ? Math.max(MEMORY_VECTOR_MIN_SIMILARITY, Math.min(MEMORY_VECTOR_MAX_SIMILARITY, Math.round(similarityThreshold)))
-                : MEMORY_VECTOR_DEFAULT_SIMILARITY;
-            memorySettings.defaultDepth = MEMORY_VECTOR_DEFAULT_DEPTH;
         };
 
         const normalizeActiveToolCallName = (value) => {
@@ -1168,7 +1213,7 @@ const app = createApp({
             return source
                 .replace(/[<>：:]/g, '')
                 .replace(/\s+/g, '_')
-                .trim() || 'tool_memory';
+                .trim() || 'tool_grep';
         };
 
         const normalizeActiveToolBaseCallName = (value) => normalizeActiveToolCallName(value)
@@ -1180,21 +1225,7 @@ const app = createApp({
 
         const normalizeActiveTool = (tool = {}) => {
             const resultCount = Number(tool.resultCount);
-            const rawCallName = normalizeActiveToolBaseCallName(tool.callName || tool.callPattern || 'tool_memory');
-            const removedWorldToolNames = [
-                'tool_world',
-                'tool_world_add',
-                'tool_world_cover',
-                'tool_world_list',
-                'tool_world_read',
-                'tool_world_edit'
-            ];
-            const isRemovedWorldTool = removedWorldToolNames.includes(rawCallName)
-                || ['world_info', 'world_info_list', 'world_info_read', 'world_info_edit'].includes(tool.type)
-                || removedWorldToolNames.includes(tool.id);
-            if (isRemovedWorldTool) {
-                return null;
-            }
+            const rawCallName = normalizeActiveToolBaseCallName(tool.callName || tool.callPattern || 'tool_grep');
             const isLegacyWebTool = rawCallName === 'tool_web'
                 || ['web_search', 'tavily', 'tavily_search'].includes(tool.type)
                 || ['tool_web', 'tool_web_add', 'tool_web_cover'].includes(tool.id)
@@ -1202,38 +1233,32 @@ const app = createApp({
             const callName = isLegacyWebTool ? 'tool_web' : rawCallName;
             const defaultTool = getDefaultActiveToolDefinitions()
                 .find(item => item.id === (isLegacyWebTool ? 'tool_web' : tool.id) || item.callName === callName);
-            const fallback = defaultTool || createDefaultActiveTool();
-            const normalizedCallName = defaultTool ? defaultTool.callName : callName;
+            if (!defaultTool) return null;
+            const fallback = defaultTool;
+            const normalizedCallName = fallback.callName;
             const resultCountVersion = Number(tool.resultCountVersion) || 1;
-            const isDefaultTool = !!defaultTool;
-            const normalizedType = isDefaultTool ? fallback.type : (tool.type || fallback.type || ACTIVE_TOOL_VECTOR_TYPE);
-            const description = isDefaultTool
-                ? fallback.description
-                : String(tool.description || fallback.description).trim();
+            const normalizedType = fallback.type;
             const countMin = getActiveToolResultCountMin({ type: normalizedType });
             const countMax = getActiveToolResultCountMax({ type: normalizedType });
             let normalizedResultCount = Number.isFinite(resultCount)
                 ? Math.max(countMin, Math.min(countMax, Math.round(resultCount)))
                 : (fallback.resultCount || ACTIVE_TOOL_DEFAULT_RESULT_COUNT);
             if (resultCountVersion < ACTIVE_TOOL_RESULT_COUNT_VERSION
-                && isDefaultTool
                 && normalizedCallName === fallback.callName
                 && normalizedType !== ACTIVE_TOOL_WEB_TYPE
                 && (!Number.isFinite(resultCount) || Math.round(resultCount) <= ACTIVE_TOOL_MIN_RESULT_COUNT || Math.round(resultCount) === 10)) {
                 normalizedResultCount = ACTIVE_TOOL_DEFAULT_RESULT_COUNT;
             }
             const normalized = {
-                id: isDefaultTool ? fallback.id : (tool.id || generateUUID()),
-                name: isDefaultTool ? fallback.name : (String(tool.name || fallback.name).trim() || fallback.name),
+                id: fallback.id,
+                name: fallback.name,
                 enabled: tool.enabled !== false,
                 type: normalizedType,
                 callName: normalizedCallName,
                 resultCount: normalizedResultCount,
                 resultCountVersion: ACTIVE_TOOL_RESULT_COUNT_VERSION,
-                description: description || fallback.description,
-                displayDescription: isDefaultTool
-                    ? fallback.displayDescription
-                    : (String(tool.displayDescription || fallback.displayDescription).trim() || fallback.displayDescription)
+                description: fallback.description,
+                displayDescription: fallback.displayDescription
             };
             if (normalizedType === ACTIVE_TOOL_WEB_TYPE) {
                 normalized.tavilyApiKey = String(tool.tavilyApiKey || tool.apiKey || fallback.tavilyApiKey || '').trim();
@@ -1364,6 +1389,8 @@ const app = createApp({
             displayedTokenUsageHistory,
             filteredTokenUsageHistory,
             formatTokenAggregate,
+            formatLatestTokenCount,
+            formatLatestUsageCost,
             formatTokenCount,
             formatTokenUsageTime,
             getTokenUsageTypeLabel,
@@ -1378,7 +1405,8 @@ const app = createApp({
             tokenUsageStats,
             tokenUsageTimeFilter,
             tokenUsageTimeFilterLabel,
-            tokenUsageTimeFilterOptions
+            tokenUsageTimeFilterOptions,
+            latestMainTokenUsage
         } = useTokenUsage({
             pageSize: LIST_PAGE_SIZE,
             cloneForStorage,
@@ -1387,7 +1415,8 @@ const app = createApp({
                 if (!getMainDb()) await initDB();
             },
             generateUUID,
-            getCharacterName: () => currentCharacter.value?.name || '',
+            getApiKey: () => settings.apiKey,
+            getApiUrl: () => settings.apiUrl,
             normalizeApiUsage,
             saveStoredValue: setStoredValue,
             toast: (...args) => showToast(...args)
@@ -1492,39 +1521,8 @@ const app = createApp({
             });
         };
 
-        // --- Back navigation（逐级返回）---
-        // 用显式视图栈记录导航，App 返回键经 window.RPHubBack() 触发回退；
-        // 不依赖 history/goBack，避免 iframe（在线分区）内部导航污染返回栈。
-        let applyingHistoryView = false;
-        const viewStack = [currentView.value];
-
-        window.RPHubBack = function () {
-            if (viewStack.length > 1) {
-                viewStack.pop();
-                const prev = viewStack[viewStack.length - 1];
-                applyingHistoryView = true;
-                currentView.value = prev;
-                applyingHistoryView = false;
-                return true;
-            }
-            // 兜底：视图栈异常到底、但当前不在根视图（聊天页）时，强制回聊天页，
-            // 避免"按一下返回就直接退回桌面"。
-            if (currentView.value !== 'chat') {
-                applyingHistoryView = true;
-                currentView.value = 'chat';
-                applyingHistoryView = false;
-                return true;
-            }
-            return false;
-        };
-
         // Watch view change to refresh embedded pages and sortable lists
         watch(currentView, (newView) => {
-            if (!applyingHistoryView) {
-                if (viewStack[viewStack.length - 1] !== newView) {
-                    viewStack.push(newView);
-                }
-            }
             settingsHelpTopic.value = '';
             if (newView === 'characters') {
                 hasOpenedCharacterManager.value = true;
@@ -1795,6 +1793,7 @@ const app = createApp({
                     const legacySize = String(settings.imageSize || '');
                     settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
                 }
+                settings.imageGenCount = Math.min(8, Math.max(2, Math.round(Number(settings.imageGenCount) || 2)));
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -2144,7 +2143,7 @@ const app = createApp({
             const imageIndex = cards.indexOf(card);
             const message = chatHistory.value[messageIndex];
             const mainText = parseCot(message?.content || '').main;
-            const imageMatches = [...mainText.matchAll(/image###([\s\S]*?)###/g)];
+            const imageMatches = [...mainText.matchAll(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/g)];
             const imageMatch = imageMatches[imageIndex];
             if (!message || imageIndex < 0 || !imageMatch) return;
             if (card.classList.contains('is-rerolling')) return;
@@ -2165,6 +2164,11 @@ const app = createApp({
                 + mainText.slice(imageMatch.index + imageMatch[0].length);
             const mainStart = message.content.lastIndexOf(mainText);
             if (mainStart < 0) return;
+            const sourceUrl = card.dataset.imageRequest || card.querySelector('img')?.getAttribute('src');
+            if (!sourceUrl) return;
+            const nextImageUrl = new URL(sourceUrl, window.location.href);
+            nextImageUrl.searchParams.set('tag', tags.join(', '));
+            nextImageUrl.searchParams.set('nocache', '1');
 
             const originalContent = message.content;
             const finishLoading = () => {
@@ -2174,39 +2178,22 @@ const app = createApp({
             card.classList.add('is-rerolling');
             button.disabled = true;
 
-            try {
-                const sourceUrl = card.dataset.imageRequest;
-                if (!sourceUrl) {
-                    showToast('找不到原始生图请求，无法重新生成', 'error');
+            const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
+            if (job.status === 'done') {
+                if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
                     finishLoading();
                     return;
                 }
-                const nextImageUrl = new URL(sourceUrl, window.location.href);
-                nextImageUrl.searchParams.set('tag', tags.join(', '));
-                nextImageUrl.searchParams.set('nocache', '1');
-
-                const job = await loadGeneratedImageCard(card, nextImageUrl.href, { fresh: true });
-                if (job.status === 'done') {
-                    if (chatHistory.value[messageIndex] !== message || message.content !== originalContent) {
-                        finishLoading();
-                        return;
-                    }
-                    message.content = originalContent.slice(0, mainStart)
-                        + updatedMainText
-                        + originalContent.slice(mainStart + mainText.length);
-                    message.shouldAnimate = false;
-                    scheduleChatHistorySave();
-                    showToast('已重新生成图片', 'success');
-                    nextTick(finishLoading);
-                    return;
-                }
-                showToast(`重新生成失败：${job.error || '未知错误'}`, 'error');
-            } catch (error) {
-                console.error('Image reroll failed:', error);
-                showToast(`重新生成失败：${error.message || '未知错误'}`, 'error');
-            } finally {
-                finishLoading();
+                message.content = originalContent.slice(0, mainStart)
+                    + updatedMainText
+                    + originalContent.slice(mainStart + mainText.length);
+                message.shouldAnimate = false;
+                scheduleChatHistorySave();
+                showToast('已重新生成图片', 'success');
+                nextTick(finishLoading);
+                return;
             }
+            finishLoading();
         };
 
         const handleGeneratedImageSave = async (event, messageIndex) => {
@@ -2246,6 +2233,14 @@ const app = createApp({
             }
         };
 
+        const handleGeneratedImageAction = (event, messageIndex) => {
+            if (event.target.closest('.generated-image-reroll')) {
+                handleGeneratedImageReroll(event, messageIndex);
+            } else if (event.target.closest('.generated-image-save')) {
+                handleGeneratedImageSave(event, messageIndex);
+            }
+        };
+
         const updateImageGenRegexState = ({ enableRegex = false } = {}) => {
             const imageGenRegexName = 'NAI画图正则';
             let regex = regexScripts.value.find(r => r.name === imageGenRegexName);
@@ -2258,14 +2253,16 @@ const app = createApp({
             const targetArtists = cardUtils.getImageStyleArtists(settings.imageStyle, settings.customImageArtists);
             const styleName = imageStyleOptions.find(option => option.value === settings.imageStyle)?.label
                 || imageStyleOptions[0].label;
+            const modelName = getImageModelName(settings.imageModel);
 
-            // 动态替换 URL 中的 artist 和 size 参数
+            // 动态替换 URL 中的 model、artist 和 size 参数
             const encodedTargetArtists = encodeURIComponent(targetArtists);
             const oldReplacement = regex.replacement;
             let newReplacement = oldReplacement.replace(/artist=[\s\S]*?(&size=)/, 'artist=' + encodedTargetArtists + '$1');
             if (newReplacement === oldReplacement) {
                 newReplacement = oldReplacement.replace(/artist=[^&]+/, 'artist=' + encodedTargetArtists);
             }
+            newReplacement = newReplacement.replace(/model=[^&]+/, 'model=' + settings.imageModel);
             newReplacement = newReplacement.replace(/size=[^&]+/, 'size=' + settings.imageSize);
             regex.replacement = newReplacement;
 
@@ -2274,6 +2271,10 @@ const app = createApp({
             const oldArtist = oldReplacement.match(/artist=([\s\S]*?)&size=/)?.[1] || oldReplacement.match(/artist=([^&]+)/)?.[1];
             if (oldArtist !== encodedTargetArtists) {
                 messages.push(styleName);
+            }
+            const oldModel = oldReplacement.match(/model=([^&]+)/)?.[1];
+            if (oldModel !== settings.imageModel) {
+                messages.push(modelName);
             }
             // 检查 Size 变化
             const oldSize = oldReplacement.match(/size=([^&]+)/)?.[1];
@@ -2315,6 +2316,16 @@ const app = createApp({
                 updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
             }
         });
+
+        watch(() => settings.imageModel, (imageModel) => {
+            if (imageModel === 'nai-diffusion-5-full' && v5UnsupportedImageStyles.has(settings.imageStyle)) {
+                settings.imageStyle = 'vertical';
+            }
+            const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
+            if (isAutoImageGenEnabled.value && messages && messages.length > 0) {
+                showToast(`生图版本已切换：${getImageModelName(imageModel)}`, 'success');
+            }
+        }, { flush: 'sync' });
 
         watch(() => settings.imageSize, () => {
             const messages = updateImageGenRegexState({ enableRegex: isAutoImageGenEnabled.value });
@@ -2506,14 +2517,14 @@ const app = createApp({
 
             let updates = [];
             try {
-                const updateJson = match[1] || match[2];
-                const parsed = parseUiTemplateUpdateJson(updateJson);
+                const updateContent = match[1];
+                const parsed = parseUiTemplateUpdates(updateContent);
                 updates = normalizeUiTemplateUpdateList(parsed, templates);
             } catch (e) {
                 const reason = e instanceof SyntaxError
-                    ? `JSON格式错误：${e.message}`
+                    ? `变量块格式错误：${e.message}`
                     : e.message;
-                return recordFailure(e?.jsonSource || match[1] || match[2], reason);
+                return recordFailure(e?.jsonSource || match[1], reason);
             }
 
             const targetMessageIndex = chatHistory.value.findIndex(msg => msg === targetMessage || (targetMessage.id && msg.id === targetMessage.id));
@@ -2522,9 +2533,7 @@ const app = createApp({
             updates.forEach(update => {
                 const targets = update?.id
                     ? activeUiTemplates.value.filter(template => template.id === update.id)
-                    : (update?.name
-                        ? activeUiTemplates.value.filter(template => template.name === update.name)
-                        : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []));
+                    : (activeUiTemplates.value.length === 1 ? [activeUiTemplates.value[0]] : []);
                 targets.forEach(template => {
                     const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, source: 'main_model' });
                     if (result.changed) {
@@ -3238,7 +3247,7 @@ const app = createApp({
             if (isAutoImageGenEnabled.value) return text; // 生图开启时保留
             return String(text)
                 .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, '')
-                .replace(/image###([\s\S]*?)###/gi, '')
+                .replace(/image###([^\r\n]*?)(?:###|(?=\r?\n)|$)/gi, '')
                 .replace(/[ \t]+\n/g, '\n')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
@@ -3333,7 +3342,7 @@ const app = createApp({
             marked,
             DOMPurify
         });
-        watch(() => [settings.disableImages, regexScripts.value, user.name], () => {
+        watch(() => [settings.disableImages, settings.styleFilterEnabled, regexScripts.value, user.name], () => {
             clearMessageRenderCaches();
         }, { deep: true });
 
@@ -3394,12 +3403,6 @@ const app = createApp({
         };
 
         // API & Models
-        const getApiEndpoint = (path) => {
-            const baseUrl = String(settings.apiUrl || '').replace(/\/+$/, '');
-            const apiUrl = /\/v\d+(\.\d+)?$/.test(baseUrl) ? baseUrl : `${baseUrl}/v1`;
-            return `${apiUrl}/${String(path || '').replace(/^\/+/, '')}`;
-        };
-
         const fetchModels = async (isManual = false) => {
             const apiKey = String(settings.apiKey || '').trim();
             if (!apiKey) {
@@ -3408,7 +3411,7 @@ const app = createApp({
             }
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
-                const url = getApiEndpoint('models');
+                const url = buildApiEndpoint(settings.apiUrl, 'models');
                 const response = await fetch(url, {
                     headers: { 'Authorization': `Bearer ${apiKey}` }
                 });
@@ -3501,7 +3504,7 @@ const app = createApp({
                 return;
             }
             await checkConnectionStatus(apiStatus, apiLatency, 'API', signal => (
-                fetch(getApiEndpoint('models'), {
+            fetch(buildApiEndpoint(settings.apiUrl, 'models'), {
                     headers: { 'Authorization': `Bearer ${settings.apiKey}` },
                     signal
                 })
@@ -3604,6 +3607,9 @@ const app = createApp({
             chatImageSelectionEpoch++;
             pendingChatImages.value = [];
         };
+        const clearPendingCardInteraction = () => {
+            pendingCardInteraction.value = '';
+        };
         const removePendingChatImage = (id) => {
             pendingChatImages.value = pendingChatImages.value.filter(image => image.id !== id);
         };
@@ -3614,9 +3620,10 @@ const app = createApp({
             reader.readAsDataURL(file);
         });
         const recognizeChatImage = async (image) => {
+            const requestStartedAt = Date.now();
             try {
                 const result = await requestChatCompletion({
-                    url: getApiEndpoint('chat/completions'),
+                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
                     apiKey: settings.apiKey,
                     model: settings.visionModel,
                     temperature: 0.2,
@@ -3646,7 +3653,8 @@ const app = createApp({
                 recordApiUsage(result.usage, {
                     type: 'image_recognition',
                     model: settings.visionModel,
-                    detail: image.name
+                    durationMs: Date.now() - requestStartedAt,
+                    outputCharacters: description.length
                 });
                 return true;
             } catch (error) {
@@ -3709,16 +3717,18 @@ const app = createApp({
         };
 
         const sendMessage = async () => {
-            if ((!userInput.value.trim() && pendingChatImages.value.length === 0) || isConversationBusy.value || isRecognizingImages.value) return;
+            if ((!userInput.value.trim() && pendingChatImages.value.length === 0 && !pendingCardInteraction.value) || isConversationBusy.value || isRecognizingImages.value) return;
             if (pendingChatImages.value.some(image => image.status !== 'ready')) {
                 showToast('请先移除识别失败的图片', 'warning');
                 return;
             }
 
             const content = userInput.value.trim();
+            const cardInteraction = pendingCardInteraction.value;
             const imageAttachments = pendingChatImages.value.map(({ dataUrl, description }) => ({ dataUrl, description }));
             const startTime = Date.now(); // Record click time
             userInput.value = '';
+            clearPendingCardInteraction();
             clearPendingChatImages();
 
             let finalContent = content;
@@ -3727,17 +3737,29 @@ const app = createApp({
                 sysInstruction.value = ''; // Auto clear after sending
             }
 
-            // Add user message locally with NAME
-            chatHistory.value.push({
-                role: 'user',
-                name: user.name,
-                content: finalContent,
-                shouldAnimate: true,
-                skipReveal: true,
-                isSelf: true,
-                avatar: user.avatar,
-                imageAttachments
-            });
+            if (cardInteraction) {
+                chatHistory.value.push({
+                    role: 'user',
+                    content: cardInteraction,
+                    isSelf: true,
+                    isTriggered: true,
+                    shouldAnimate: true,
+                    skipReveal: true
+                });
+            }
+            if (finalContent || imageAttachments.length) {
+                // Add user message locally with NAME
+                chatHistory.value.push({
+                    role: 'user',
+                    name: user.name,
+                    content: finalContent,
+                    shouldAnimate: true,
+                    skipReveal: true,
+                    isSelf: true,
+                    avatar: user.avatar,
+                    imageAttachments
+                });
+            }
             await nextTick();
 
             // Single player
@@ -3754,6 +3776,7 @@ const app = createApp({
         const clearChat = () => {
             confirmAction('确定要清空聊天记录吗？记忆也将一并清空，此操作无法撤销。', () => {
                 clearPendingChatImages();
+                clearPendingCardInteraction();
                 abortConversationBackgroundWork();
                 resetChatRenderWindow();
                 chatHistory.value = [];
@@ -3785,20 +3808,6 @@ const app = createApp({
         };
 
         const toggleChatFullscreen = async () => {
-            const native = window.RoleplayHubNative;
-            if (native && typeof native.setFullscreen === 'function') {
-                const next = !isChatFullscreen.value;
-                isChatFullscreen.value = next;
-                if (next) closeMobileMenu();
-                native.setFullscreen(next);
-                setTimeout(() => {
-                    if (typeof syncMobileVisualViewport === 'function') {
-                        syncMobileVisualViewport({ force: true });
-                    }
-                    window.dispatchEvent(new Event('resize'));
-                }, 300);
-                return;
-            }
             try {
                 if (getNativeFullscreenElement()) {
                     isChatFullscreen.value = false;
@@ -3875,13 +3884,16 @@ const app = createApp({
                     finalContent = msg.originalCot + '\n\n' + finalContent;
                 }
                 msg.content = finalContent;
+                if (contentChanged) {
+                    delete msg.styleFilterHits;
+                    openStyleFilterMessageKey.value = '';
+                }
                 clearMessageEditState(msg);
                 if (!contentChanged) {
                     await saveChatHistoryNow();
                     showToast('消息已保存', 'success');
                     return;
                 }
-
                 abortConversationBackgroundWork();
                 const snapshot = await ensureConversationMessageIds();
                 const affectedTurn = snapshot.turns.find(turnInfo =>
@@ -3996,7 +4008,7 @@ const app = createApp({
                 markUiTemplateStatus('skipped', '未选模型');
                 return false;
             }
-            const url = getApiEndpoint('chat/completions');
+            const url = buildApiEndpoint(settings.apiUrl, 'chat/completions');
 
             try {
                 const updateRun = startUiTemplateUpdateRun();
@@ -4010,22 +4022,12 @@ const app = createApp({
                 const pendingTemplateUpdates = [];
 
                 const normalizeUiTemplateUpdates = (parsed, template) => {
-                    if (Array.isArray(parsed?.updates)) {
-                        return normalizeUiTemplateUpdateList(parsed, [template]);
-                    }
-                    if (Array.isArray(parsed)) {
-                        return [{ variables: parsed, reason: '' }];
-                    }
-                    if (!parsed || typeof parsed !== 'object') return [];
-                    if (Object.prototype.hasOwnProperty.call(parsed, 'variables')) {
-                        return [{ variables: parsed.variables, reason: String(parsed.reason || '').trim() }];
-                    }
-                    return [{ variables: parsed, reason: '' }];
+                    return normalizeUiTemplateUpdateList(parsed, [template]);
                 };
 
                 const applyTemplateUpdates = (template, updates, model) => {
                     updates.forEach(update => {
-                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn, matchName: false });
+                        const result = applyUiTemplateUpdateListToTemplate(template, [update], { model, turn });
                         if (result.changed) {
                             changedFieldCount += result.fieldCount;
                             hasChanges = true;
@@ -4035,6 +4037,7 @@ const app = createApp({
 
                 await Promise.all(templates.map(async (template) => {
                     const model = fallbackModel;
+                    const requestStartedAt = Date.now();
                     try {
                         const currentVariableJson = JSON.stringify(template.variableState || {}, null, 2);
                         const variableSchemaText = stringifyUiSchema(template.variableSchema).trim();
@@ -4074,12 +4077,13 @@ const app = createApp({
                         const data = await response.json();
                         if (!isCurrentRun()) return;
                         let content = data.choices?.[0]?.message?.content || '';
-                        const parsed = parseUiTemplateUpdateJson(content);
+                        const parsed = parseUiTemplateUpdates(content);
                         const updates = normalizeUiTemplateUpdates(parsed, template);
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
-                            detail: template.name || ''
+                            durationMs: Date.now() - requestStartedAt,
+                            outputCharacters: content.length
                         });
                         pendingTemplateUpdates.push({ template, updates, model });
                     } catch (e) {
@@ -4380,14 +4384,7 @@ const app = createApp({
         };
 
         const getEnabledActiveTools = () => normalizeActiveTools()
-            .filter(tool => tool.enabled !== false && tool.callName)
-            .filter(tool => memorySettings.mode === MEMORY_MODE_VECTOR || !isVectorActiveTool(tool));
-
-        const isVectorActiveTool = (tool) => tool?.type === ACTIVE_TOOL_VECTOR_TYPE
-            || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_memory';
-
-        const isKeywordActiveTool = (tool) => tool?.type === ACTIVE_TOOL_KEYWORD_TYPE
-            || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_grep';
+            .filter(tool => tool.enabled !== false && tool.callName);
 
         const isWebActiveTool = (tool) => tool?.type === ACTIVE_TOOL_WEB_TYPE
             || normalizeActiveToolBaseCallName(tool?.callName) === 'tool_web'
@@ -4395,8 +4392,6 @@ const app = createApp({
             || /tavily|联网搜索/i.test(String(tool?.name || ''));
 
         const getActiveToolDisplayDescription = (tool) => tool?.displayDescription || '暂无说明';
-
-        const shouldSuppressStandardVectorMemoryRecall = () => false;
 
         const appendActiveToolReminderToLatestUserMessage = (msgArray) => {
             if (getEnabledActiveTools().length === 0) return msgArray;
@@ -4420,7 +4415,7 @@ const app = createApp({
         };
 
         const getActiveToolCallLabels = (tool) => {
-            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_memory');
+            const baseCallName = normalizeActiveToolBaseCallName(tool?.callName || 'tool_grep');
             return {
                 add: `${baseCallName}_add`,
                 cover: `${baseCallName}_cover`
@@ -4439,7 +4434,7 @@ const app = createApp({
                         resultCount: tool.resultCount,
                         addCallName: labels.add,
                         coverCallName: labels.cover,
-                        kind: isWebActiveTool(tool) ? 'web' : (isKeywordActiveTool(tool) ? 'keyword' : 'vector')
+                        kind: isWebActiveTool(tool) ? 'web' : 'keyword'
                     };
                 }),
                 reminder: getActiveToolLatestUserReminder(),
@@ -4447,7 +4442,8 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const appendNextResponsePrompt = (messageList, { cotEnabled = false, writingStylePrompt = '' } = {}) => {
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
                 && Array.isArray(message._sourceIndexes)
@@ -4456,7 +4452,10 @@ const app = createApp({
             if (!target) return;
 
             const prompt = BUILTIN_PROMPTS.buildNextResponsePrompt({
+                autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
+                imageGenCount: settings.imageGenCount,
+                useThinkingTag,
                 writingStylePrompt,
                 uiTemplateEnabled: settings.uiTemplateEnabled
                     && settings.uiTemplateMainModelAnalysis
@@ -4466,10 +4465,9 @@ const app = createApp({
         };
         let _wasCancelled = false;
         const generateResponse = async (startTime = null, options = {}) => {
+            const native = window.RoleplayHubNative;
             const reuseGeneratingState = options.reuseGeneratingState === true;
             if (isGenerating.value && !reuseGeneratingState) return;
-            const native = window.RoleplayHubNative;
-            try {
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
@@ -4483,6 +4481,9 @@ const app = createApp({
             const continuationTargetMessage = continueAssistantMessageId
                 ? chatHistory.value.find(msg => msg && msg.role === 'assistant' && msg.id === continueAssistantMessageId) || null
                 : null;
+            const initialAssistantOutputLength = continuationTargetMessage
+                ? String(continuationTargetMessage.content || '').length + String(continuationTargetMessage.reasoning || '').length
+                : 0;
             if (!continuationTargetMessage && activeToolDepth === 0) {
                 resetActiveToolResultContext();
             }
@@ -4491,7 +4492,7 @@ const app = createApp({
             if (native && typeof native.requestWakeLock === 'function') {
                 try { native.requestWakeLock(); } catch (e) { /* ignore */ }
             }
-            // 工具续写时内容会回填到旧气泡里，这里先占住“已在接收”的状态，
+            // 工具续写时内容会回填到旧气泡里，这里先占住"已在接收"的状态，
             // 避免底部全局 typing 占位气泡冒出来。
             isReceiving.value = !!continuationTargetMessage;
             isThinking.value = false;
@@ -4819,19 +4820,19 @@ const app = createApp({
             appendPendingUiTemplateCorrection(messages);
             appendNextResponsePrompt(messages, {
                 cotEnabled: cotPresets.length > 0,
+                useThinkingTag: usesThinkingCotTag(requestModel),
                 writingStylePrompt: writingStylePresets
                     .map(preset => preset.content
                         .replace(/^\s*<writing_style>\s*/i, '')
                         .replace(/\s*<\/writing_style>\s*$/i, ''))
-                    .concat(/deepseek/i.test(requestModel) ? '正文最少1000字。' : [])
+                .concat(/deepseek/i.test(requestModel) ? '正文最少700字。' : [])
                     .join('\n\n')
             });
 
             let selectedVectorMemories = [];
             if (memorySettings.enabled
                 && memorySettings.mode === MEMORY_MODE_VECTOR
-                && memories.value.length > 0
-                && !shouldSuppressStandardVectorMemoryRecall()) {
+                && memories.value.length > 0) {
                 selectedVectorMemories = await selectVectorMemoriesForContext(abortController.value.signal, {
                     excludedTurns: getRetainedRecentMemoryTurns(postprocessedChatHistory)
                 });
@@ -4846,7 +4847,7 @@ const app = createApp({
                 messages,
                 worldInfoGroups: wiGroups,
                 vectorMemories: vectorMemoriesForContext,
-                vectorDepth: Number(memorySettings.defaultDepth) || MEMORY_VECTOR_DEFAULT_DEPTH,
+                vectorDepth: MEMORY_VECTOR_DEFAULT_DEPTH,
                 safeTargetLimit
             });
             messages = appendActiveToolReminderToLatestUserMessage(messages);
@@ -4984,7 +4985,7 @@ const app = createApp({
 
             try {
                 const responseResult = await requestChatCompletion({
-                    url: getApiEndpoint('chat/completions'),
+                url: buildApiEndpoint(settings.apiUrl, 'chat/completions'),
                     apiKey: settings.apiKey,
                     model: requestModel,
                     messages: apiMessages,
@@ -5035,10 +5036,17 @@ const app = createApp({
                         }
                     }
                 }
+                const duration = Date.now() - generationStartTime;
+                const outputCharacters = assistantMessage
+                    ? Math.max(0, String(assistantMessage.content || '').length
+                        + String(assistantMessage.reasoning || '').length
+                        - initialAssistantOutputLength)
+                    : 0;
                 recordApiUsage(responseUsage, {
                     type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
                     model: requestModel,
-                    detail: activeToolDepth > 0 ? `第 ${activeToolDepth} 次续写` : ''
+                    durationMs: duration,
+                    outputCharacters
                 });
 
                 if (assistantMessage) {
@@ -5047,7 +5055,6 @@ const app = createApp({
                         applyMainModelUiTemplateUpdates(assistantMessage, requestModel);
                     }
 
-                    const duration = Date.now() - generationStartTime;
                     recentGenerationTimes.value.push({ id: assistantMessage.id, duration });
                     if (recentGenerationTimes.value.length > 5) recentGenerationTimes.value.shift();
                 }
@@ -5089,7 +5096,21 @@ const app = createApp({
                 if (native && typeof native.releaseWakeLock === 'function') {
                     try { native.releaseWakeLock(); } catch (e) { /* ignore */ }
                 }
-                if (assistantMessage?.content) filterBlockedStyleText(assistantMessage.content, { log: true });
+                if (assistantMessage?.content) {
+                    const styleFilterHits = [];
+                    assistantMessage.content = filterBlockedStyleText(assistantMessage.content, {
+                        log: true,
+                        collect: styleFilterHits
+                    });
+                    const previousHits = continuingAssistantMessage && Array.isArray(assistantMessage.styleFilterHits)
+                        ? assistantMessage.styleFilterHits
+                        : [];
+                    const combinedHits = [...previousHits, ...styleFilterHits]
+                        .map(normalizeStyleFilterHit)
+                        .filter(Boolean);
+                    if (combinedHits.length) assistantMessage.styleFilterHits = combinedHits;
+                    else delete assistantMessage.styleFilterHits;
+                }
                 if (continuationToolCall && continuationToolCall.status === 'continuing') {
                     continuationToolCall.status = 'done';
                 }
@@ -5133,11 +5154,6 @@ const app = createApp({
                     nextTick(() => {
                         extractMemoryFromChat();
                     });
-                }
-            }
-            } finally {
-                if (native && typeof native.releaseWakeLock === 'function') {
-                    try { native.releaseWakeLock(); } catch (e) { /* ignore */ }
                 }
             }
         };
@@ -5335,12 +5351,13 @@ const app = createApp({
             return content;
         };
 
-        const requestClassicMemoryCompletion = async (requestMessages, detail, signal) => {
+        const requestClassicMemoryCompletion = async (requestMessages, signal) => {
             const model = String(memorySettings.classicModel || '').trim();
             if (!settings.apiUrl || !settings.apiKey) throw new Error('请先配置 API 地址和 Key');
             if (!model) throw new Error('请先选择总结模式副模型');
 
-            const response = await fetch(getApiEndpoint('chat/completions'), {
+            const requestStartedAt = Date.now();
+            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'chat/completions'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5361,20 +5378,21 @@ const app = createApp({
                 .replace(/^(?:最新对话总结|总结)[:：]\s*/i, '')
                 .trim();
             if (!summary) throw new Error('副模型没有返回有效总结');
-            recordApiUsage(extractApiUsageFromText(rawText), { type: 'summary', model, detail });
+            recordApiUsage(extractApiUsageFromText(rawText), {
+                type: 'summary',
+                model,
+                durationMs: Date.now() - requestStartedAt,
+                outputCharacters: summary.length
+            });
             return summary.replace(/\n{3,}/g, '\n\n');
         };
 
         const requestClassicMemorySummary = async (job, signal) => {
-            const summaryLengthRequirement = SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]
-                || SUMMARY_LENGTH_REQUIREMENTS[SUMMARY_LEVEL_DEFAULT];
-
             const requestMessages = [{
                 role: 'system',
                 content: BUILTIN_PROMPTS.buildClassicSummarySystemPrompt({
                     userName: user.name,
-                    characterName: currentCharacter.value?.name,
-                    lengthRequirement: summaryLengthRequirement
+                    characterName: currentCharacter.value?.name
                 })
             }];
 
@@ -5389,21 +5407,18 @@ const app = createApp({
                 role: 'user',
                 content: BUILTIN_PROMPTS.buildClassicSummaryFinalInstruction(job.turn)
             });
-            return requestClassicMemoryCompletion(requestMessages, `第 ${job.turn} 轮`, signal);
+            return requestClassicMemoryCompletion(requestMessages, signal);
         };
 
         const requestClassicSecondarySummary = async (group, signal) => {
             const ordered = [...group].sort((a, b) => Number(a.turn) - Number(b.turn));
             const startTurn = Number(ordered[0]?.turn) || 1;
             const endTurn = Number(ordered[ordered.length - 1]?.turn) || startTurn;
-            const lengthRequirement = SUMMARY_LENGTH_REQUIREMENTS[memorySettings.summaryLevel]
-                || SUMMARY_LENGTH_REQUIREMENTS[SUMMARY_LEVEL_DEFAULT];
             const requestMessages = [{
                 role: 'system',
                 content: BUILTIN_PROMPTS.buildClassicSecondarySummaryPrompt({
                     userName: user.name,
                     characterName: currentCharacter.value?.name,
-                    lengthRequirement,
                     startTurn,
                     endTurn
                 })
@@ -5411,7 +5426,7 @@ const app = createApp({
                 role: 'user',
                 content: ordered.map(memory => `【第 ${memory.turn} 轮】\n${memory.summary}`).join('\n\n')
             }];
-            return requestClassicMemoryCompletion(requestMessages, `第 ${startTurn}-${endTurn} 轮二次压缩`, signal);
+            return requestClassicMemoryCompletion(requestMessages, signal);
         };
 
         const getSecondaryClassicSourceMemories = (memory) => prepareClassicMemoriesForRuntime(
@@ -5445,58 +5460,96 @@ const app = createApp({
             return groups;
         };
 
-        const compressEligibleClassicMemories = async (totalTurns, signal) => {
+        const compressEligibleClassicMemories = async (totalTurns, signal, interactive = false) => {
             const groups = getEligibleClassicSecondaryGroups(totalTurns);
             if (!groups.length) return 0;
             const characterId = currentCharacter.value?.uuid;
             const storyScopeId = getCurrentStoryBranchScopeId();
             const epoch = _classicExtractionEpoch;
+            const concurrency = normalizeClassicMemoryConcurrency(memorySettings.classicConcurrency);
             let completed = 0;
             let memorySourceForSave = null;
             classicBatchExtractProgress.value = { current: 0, total: groups.length };
             try {
-                for (const group of groups) {
+                for (let offset = 0; offset < groups.length; offset += concurrency) {
                     if (signal?.aborted || epoch !== _classicExtractionEpoch
                         || currentCharacter.value?.uuid !== characterId
                         || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    let summary;
-                    try {
-                        summary = await requestClassicSecondarySummary(group, signal);
-                    } catch (error) {
-                        if (error?.name === 'AbortError') throw error;
-                        console.warn('Classic memory secondary compression failed:', error);
-                        break;
+                    const results = await Promise.all(groups.slice(offset, offset + concurrency).map(async group => {
+                        try {
+                            return { group, summary: await requestClassicSecondarySummary(group, signal) };
+                        } catch (error) {
+                            return { group, error };
+                        } finally {
+                            classicBatchExtractProgress.value.current++;
+                        }
+                    }));
+                    if (signal?.aborted || epoch !== _classicExtractionEpoch
+                        || currentCharacter.value?.uuid !== characterId
+                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
+                    let failed = false;
+                    for (let result of results) {
+                        if (result.error) {
+                            if (result.error.name === 'AbortError') throw result.error;
+                            if (interactive) {
+                                let retryError = result.error;
+                                const range = `${result.group[0].turn}-${result.group[result.group.length - 1].turn}`;
+                                while (true) {
+                                    const retry = await showVueConfirmModal(
+                                        '总结模式补录遇到错误',
+                                        `第 ${range} 轮二次压缩失败：\n${retryError.message}\n\n是否立即重试？`
+                                    );
+                                    if (!retry) {
+                                        const abortError = new Error('用户取消了重试并中止了二次压缩');
+                                        abortError.name = 'AbortError';
+                                        throw abortError;
+                                    }
+                                    try {
+                                        result = {
+                                            group: result.group,
+                                            summary: await requestClassicSecondarySummary(result.group, signal)
+                                        };
+                                        break;
+                                    } catch (error) {
+                                        if (error.name === 'AbortError') throw error;
+                                        retryError = error;
+                                    }
+                                }
+                            } else {
+                                console.warn('Classic memory secondary compression failed:', result.error);
+                                failed = true;
+                                continue;
+                            }
+                        }
+                        const { group, summary } = result;
+                        const sourceIds = new Set(group.map(memory => memory.id));
+                        if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) continue;
+                        const startTurn = Number(group[0].turn);
+                        const endTurn = Number(group[group.length - 1].turn);
+                        const sourceMemories = group.map(memory => cloneForStorage(memory));
+                        const mergedMemory = markRuntimeRaw({
+                            id: generateUUID(),
+                            timestamp: Date.now(),
+                            turn: endTurn,
+                            turnStart: startTurn,
+                            turnEnd: endTurn,
+                            summary,
+                            enabled: true,
+                            classicMemory: true,
+                            secondaryCompressed: true,
+                            summaryModel: String(memorySettings.classicModel || '').trim(),
+                            sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
+                            sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
+                            sourceMemories
+                        });
+                        classicMemories.value = [
+                            ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
+                            mergedMemory
+                        ];
+                        memorySourceForSave = classicMemories.value;
+                        completed++;
                     }
-                    if (signal?.aborted || epoch !== _classicExtractionEpoch
-                        || currentCharacter.value?.uuid !== characterId
-                        || getCurrentStoryBranchScopeId() !== storyScopeId) break;
-                    const sourceIds = new Set(group.map(memory => memory.id));
-                    if (!group.every(memory => classicMemories.value.some(item => item.id === memory.id))) break;
-                    const startTurn = Number(group[0].turn);
-                    const endTurn = Number(group[group.length - 1].turn);
-                    const sourceMemories = group.map(memory => cloneForStorage(memory));
-                    const mergedMemory = markRuntimeRaw({
-                        id: generateUUID(),
-                        timestamp: Date.now(),
-                        turn: endTurn,
-                        turnStart: startTurn,
-                        turnEnd: endTurn,
-                        summary,
-                        enabled: true,
-                        classicMemory: true,
-                        secondaryCompressed: true,
-                        summaryModel: String(memorySettings.classicModel || '').trim(),
-                        sourceUserIds: [...new Set(group.flatMap(memory => memory.sourceUserIds || []))],
-                        sourceAssistantIds: [...new Set(group.flatMap(memory => memory.sourceAssistantIds || []))],
-                        sourceMemories
-                    });
-                    classicMemories.value = [
-                        ...classicMemories.value.filter(memory => !sourceIds.has(memory.id)),
-                        mergedMemory
-                    ];
-                    memorySourceForSave = classicMemories.value;
-                    completed++;
-                    classicBatchExtractProgress.value.current++;
+                    if (failed) break;
                 }
             } finally {
                 if (completed > 0) await saveClassicMemoriesNow(storyScopeId, memorySourceForSave);
@@ -5713,7 +5766,8 @@ const app = createApp({
             const normalizedInputs = inputs.map(input => String(input || '').trim());
             if (normalizedInputs.some(input => !input)) throw new Error('嵌入内容不能为空');
 
-            const response = await fetch(getApiEndpoint('embeddings'), {
+            const requestStartedAt = Date.now();
+            const response = await fetch(buildApiEndpoint(settings.apiUrl, 'embeddings'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -5750,7 +5804,8 @@ const app = createApp({
             recordApiUsage(getApiUsagePayload(data), {
                 type: 'embedding',
                 model,
-                detail: `${normalizedInputs.length} 条输入`
+                durationMs: Date.now() - requestStartedAt,
+                outputCharacters: 0
             });
             return vectors;
         };
@@ -5934,8 +5989,7 @@ const app = createApp({
         );
 
         const passesMemorySimilarityThreshold = (score) => {
-            const threshold = Number(memorySettings.similarityThreshold) || MEMORY_VECTOR_DEFAULT_SIMILARITY;
-            return score >= threshold / 100;
+            return score >= MEMORY_VECTOR_SIMILARITY_THRESHOLD / 100;
         };
 
         const getRecentUserMemoryQueries = (limit = 3) => {
@@ -6223,27 +6277,6 @@ const app = createApp({
             isVectorMemorySearching.value = false;
         };
 
-        const searchVectorMemoriesForTool = async (query, limit, signal) => {
-            const cleanQuery = trimMemoryText(stripVectorMemoryCode(query), 800);
-            if (!cleanQuery) return [];
-
-            const excludedTurns = getCurrentRetainedVectorMemoryTurns();
-            const vectorMemories = memories.value
-                .filter(isEnabledVectorMemory)
-                .filter(memory => isEmbeddingLike(memory.embedding) && memory.embedding.length > 0)
-                .filter(memory => {
-                    const turn = Number(memory.turn) || 0;
-                    return turn <= 0 || !excludedTurns.has(turn);
-                });
-            if (vectorMemories.length === 0) return [];
-
-            const [queryVector] = await requestMemoryEmbeddings([`工具检索：${cleanQuery}`], signal);
-            const queryTerms = extractVectorQueryTerms(cleanQuery);
-            return (await scoreVectorMemories(vectorMemories, queryVector, queryTerms, signal))
-                .slice(0, Math.max(ACTIVE_TOOL_MIN_RESULT_COUNT, Math.min(ACTIVE_TOOL_MAX_RESULT_COUNT, Number(limit) || ACTIVE_TOOL_DEFAULT_RESULT_COUNT)))
-                .map(toScoredVectorMemory);
-        };
-
         const extractKeywordToolTerms = (query) => {
             const cleanQuery = trimMemoryText(stripVectorMemoryCode(query), 300);
             if (!cleanQuery) return [];
@@ -6516,7 +6549,7 @@ const app = createApp({
         const formatActiveToolNoticeContext = (tool, query, mode = 'add', status = 'empty', message = '') => {
             const title = escapeXmlAttribute(tool?.name || '工具');
             const modeValue = mode === 'cover' ? 'cover' : 'add';
-            const labels = getActiveToolCallLabels(tool || createDefaultActiveTool());
+            const labels = getActiveToolCallLabels(tool);
             const callName = escapeXmlAttribute(modeValue === 'cover' ? labels.cover : labels.add);
             const cleanQuery = trimMemoryText(query, 800);
             const statusValue = escapeXmlAttribute(status || 'notice');
@@ -6533,7 +6566,7 @@ const app = createApp({
 
         const normalizeActiveToolResultContext = (resultContext, tool, query, mode = 'add') => {
             const text = String(resultContext || '').trim();
-            const hasResultBody = /<(?:description|error|memory_fragment|dialogue_fragment|web_source|web_page|failed_page)\b/i.test(text);
+            const hasResultBody = /<(?:description|error|dialogue_fragment|web_source|web_page|failed_page)\b/i.test(text);
             if (!text || text === '</active_tool_result>' || !text.includes('<active_tool_result') || !hasResultBody) {
                 return formatActiveToolNoticeContext(
                     tool,
@@ -6627,60 +6660,30 @@ const app = createApp({
                     '</active_tool_result>'
                 ].filter(Boolean).join('\n');
             }
-            if (isKeywordActiveTool(tool)) {
-                if (!Array.isArray(results) || results.length === 0) {
-                    return [
-                        `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                        `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
-                        '</active_tool_result>'
-                    ].join('\n');
-                }
-
-                const formattedResults = results.map(item => {
-                    const turnValue = escapeXmlAttribute(item.turn || '?');
-                    const roleValue = escapeXmlAttribute(item.role || 'unknown');
-                    const speakerValue = escapeXmlAttribute(item.speaker || '');
-                    const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
-                    const fragmentText = indentXmlText(item.dialogueText || '', 4);
-                    return [
-                        `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
-                        fragmentText,
-                        '  </dialogue_fragment>'
-                    ].join('\n');
-                }).join('\n\n');
-
-                return [
-                    `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                    `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
-                    formattedResults,
-                    '</active_tool_result>'
-                ].join('\n');
-            }
             if (!Array.isArray(results) || results.length === 0) {
                 return [
                     `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}" status="empty">`,
-                    `  <description>本次向量记忆没有检索成功，没有找到可用记忆片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请先判断当前上下文是否已经明确且足够；如果仍不够明确完整，请换更具体的检索内容再次调用，不要重复完全相同的查询。</description>`,
+                    `  <description>本次关键词检索没有检索成功，没有找到包含该关键词的对话片段，也没有提供可作为答案依据的新证据。${modeDescription}本段内容已插入最后一条用户消息结尾。请换更贴近原文的关键词再次调用，不要编造未出现过的对话内容。</description>`,
                     '</active_tool_result>'
                 ].join('\n');
             }
 
-            const formattedResults = sortVectorMemoriesByTime(results).map(memory => {
-                const turnValue = escapeXmlAttribute(memory.turn || '?');
-                const scoreValue = escapeXmlAttribute(Number.isFinite(memory.vectorScore)
-                    ? `${(memory.vectorScore * 100).toFixed(1)}%`
-                    : 'unknown');
-                const storyTimeValue = escapeXmlAttribute(memory.storyTime || '');
-                const fragmentText = indentXmlText(memory.paragraph || memory.summary || memory.sourceText || '', 4);
+            const formattedResults = results.map(item => {
+                const turnValue = escapeXmlAttribute(item.turn || '?');
+                const roleValue = escapeXmlAttribute(item.role || 'unknown');
+                const speakerValue = escapeXmlAttribute(item.speaker || '');
+                const matchedValue = escapeXmlAttribute((item.matchedTerms || []).join(', '));
+                const fragmentText = indentXmlText(item.dialogueText || '', 4);
                 return [
-                    `  <memory_fragment turn="${turnValue}" similarity="${scoreValue}" story_time="${storyTimeValue}">`,
+                    `  <dialogue_fragment turn="${turnValue}" role="${roleValue}" speaker="${speakerValue}" matched="${matchedValue}">`,
                     fragmentText,
-                    '  </memory_fragment>'
+                    '  </dialogue_fragment>'
                 ].join('\n');
             }).join('\n\n');
 
             return [
                 `<active_tool_result name="${title}" call="${callName}" mode="${modeValue}" query="${escapeXmlAttribute(cleanQuery)}">`,
-                `  <description>以下是系统根据上一条正文工具调用检索到的向量记忆。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请用这些结果继续回答用户，不要复述工具调用标签，也不要把这些内容当作当前现场；如果结果仍不足以明确回答，或仍有疑点，请换更具体的检索内容继续调用工具。</description>`,
+                `  <description>以下是系统根据关键词从当前对话历史中精确抓取到的原文片段。${modeDescription}本段内容由系统插入最后一条用户消息结尾。请优先依据这些原文片段继续回答，不要把没有出现过的内容说成事实；如果仍不足以明确回答，请换更贴近原文的关键词继续调用工具。</description>`,
                 formattedResults,
                 '</active_tool_result>'
             ].join('\n');
@@ -6832,11 +6835,11 @@ const app = createApp({
         const createActiveToolUi = (toolCall, initialStatus = 'queued') => ({
             id: generateUUID(),
             toolId: toolCall.tool?.id || '',
-            toolType: toolCall.tool?.type || ACTIVE_TOOL_VECTOR_TYPE,
+            toolType: toolCall.tool?.type || ACTIVE_TOOL_KEYWORD_TYPE,
             toolResultCount: toolCall.tool?.resultCount || ACTIVE_TOOL_DEFAULT_RESULT_COUNT,
-            name: toolCall.tool?.name || '向量记忆主动检索',
-            callName: toolCall.callLabel || toolCall.tool?.callName || 'tool_memory_add',
-            baseCallName: toolCall.tool?.callName || 'tool_memory',
+            name: toolCall.tool?.name || '关键词检索',
+            callName: toolCall.callLabel || toolCall.tool?.callName || 'tool_grep_add',
+            baseCallName: toolCall.tool?.callName || 'tool_grep',
             mode: toolCall.mode || 'add',
             query: toolCall.query || '',
             raw: toolCall.raw,
@@ -6856,24 +6859,20 @@ const app = createApp({
                 || toolCall?.callName
                 || ''
             );
-            if (toolCall?.toolType === ACTIVE_TOOL_KEYWORD_TYPE || baseCallName === 'tool_grep') {
-                return ACTIVE_TOOL_KEYWORD_TYPE;
-            }
             if (toolCall?.toolType === ACTIVE_TOOL_WEB_TYPE || baseCallName === 'tool_web') {
                 return ACTIVE_TOOL_WEB_TYPE;
             }
-            if (toolCall?.toolType === ACTIVE_TOOL_VECTOR_TYPE || baseCallName === 'tool_memory') {
-                return ACTIVE_TOOL_VECTOR_TYPE;
+            if (toolCall?.toolType === ACTIVE_TOOL_KEYWORD_TYPE || baseCallName === 'tool_grep') {
+                return ACTIVE_TOOL_KEYWORD_TYPE;
             }
-            return baseCallName || toolCall?.toolId || ACTIVE_TOOL_VECTOR_TYPE;
+            return '';
         };
 
         const getToolCallDisplayName = (toolCall) => {
             const groupKey = getActiveToolUiGroupKey(toolCall);
-            if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) return '关键词检索';
             if (groupKey === ACTIVE_TOOL_WEB_TYPE) return 'Tavily 联网搜索';
-            if (groupKey === ACTIVE_TOOL_VECTOR_TYPE) return '向量记忆主动检索';
-            return toolCall?.name || '向量记忆主动检索';
+            if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) return '关键词检索';
+            return toolCall?.name || '工具调用';
         };
 
         const getToolCallModeText = (toolCall) => {
@@ -6890,8 +6889,7 @@ const app = createApp({
             if (groupKey === ACTIVE_TOOL_KEYWORD_TYPE) {
                 return mode === 'cover' ? '覆盖关键词检索' : '关键词检索';
             }
-
-            return mode === 'cover' ? '覆盖向量检索' : '向量检索';
+            return '工具调用';
         };
 
         const TOOL_CALL_RUNNING_STATUSES = ['running', 'receiving', 'queued'];
@@ -7098,10 +7096,10 @@ const app = createApp({
                 message._activeToolPendingUiId = toolUi.id;
             }
             toolUi.toolId = toolCall.tool?.id || toolUi.toolId || '';
-            toolUi.toolType = toolCall.tool?.type || toolUi.toolType || ACTIVE_TOOL_VECTOR_TYPE;
+            toolUi.toolType = toolCall.tool?.type || toolUi.toolType || ACTIVE_TOOL_KEYWORD_TYPE;
             toolUi.name = toolCall.tool?.name || toolUi.name || '工具';
-            toolUi.callName = toolCall.callLabel || toolUi.callName || 'tool_memory_add';
-            toolUi.baseCallName = toolCall.tool?.callName || toolUi.baseCallName || 'tool_memory';
+            toolUi.callName = toolCall.callLabel || toolUi.callName || 'tool_grep_add';
+            toolUi.baseCallName = toolCall.tool?.callName || toolUi.baseCallName || 'tool_grep';
             toolUi.mode = toolCall.mode || toolUi.mode || 'add';
             toolUi.query = getPendingToolCallQueryPreview(toolCall);
             toolUi.reason = cleanActiveToolCallReason(toolCall.reason || toolUi.reason || '');
@@ -7192,7 +7190,7 @@ const app = createApp({
             const baseCallName = normalizeActiveToolBaseCallName(
                 toolUi?.baseCallName
                 || toolUi?.callName
-                || 'tool_memory'
+                || 'tool_grep'
             );
             const enabledMatch = getEnabledActiveTools().find(tool => (
                 tool.id === toolUi?.toolId
@@ -7202,11 +7200,12 @@ const app = createApp({
             return getDefaultActiveToolDefinitions().find(tool => (
                 tool.id === toolUi?.toolId
                 || normalizeActiveToolBaseCallName(tool.callName) === baseCallName
-            )) || createDefaultActiveTool();
+            )) || null;
         };
 
         const buildActiveToolCallFromUi = (toolUi) => {
             const tool = resolveActiveToolForUi(toolUi);
+            if (!tool) return null;
             return {
                 tool,
                 mode: toolUi?.mode || 'add',
@@ -7222,7 +7221,7 @@ const app = createApp({
             let toolUis = Array.isArray(assistantMessage?.toolCalls)
                 ? assistantMessage.toolCalls.filter(toolCall => ['queued', 'running'].includes(toolCall?.status))
                 : [];
-            let toolCalls = toolUis.map(buildActiveToolCallFromUi).filter(toolCall => toolCall.query);
+            let toolCalls = toolUis.map(buildActiveToolCallFromUi).filter(toolCall => toolCall?.query);
 
             if (toolCalls.length === 0) {
                 toolCalls = findActiveToolCallsInAssistantMessage(assistantMessage);
@@ -7290,25 +7289,15 @@ const app = createApp({
                         await saveChatHistoryNow();
                     }
 
-                    if (isVectorActiveTool(toolCall.tool) && !memorySettings.enabled) {
-                        throw new Error('记忆系统未开启，无法执行向量检索。');
-                    }
-
-                    const results = isKeywordActiveTool(toolCall.tool)
-                        ? searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, {
-                            excludeMessageId: assistantMessage.id
-                        })
-                        : isWebActiveTool(toolCall.tool)
+                    const results = isWebActiveTool(toolCall.tool)
                         ? await searchWebByTavilyForTool(
                             toolCall.query,
                             toolCall.tool,
                             toolAbort.signal
                         )
-                        : await searchVectorMemoriesForTool(
-                            toolCall.query,
-                            toolCall.tool.resultCount,
-                            toolAbort.signal
-                        );
+                        : searchDialogueByKeywordForTool(toolCall.query, toolCall.tool.resultCount, {
+                            excludeMessageId: assistantMessage.id
+                        });
                     if (toolAbort.signal.aborted) throw createAbortReason('Generation cancelled by user');
 
                     const resultContext = normalizeActiveToolResultContext(
@@ -7626,7 +7615,8 @@ const app = createApp({
                         foundJobs = true;
                         secondaryCompressedCount += await compressEligibleClassicMemories(
                             currentTurnCount,
-                            batchController.signal
+                            batchController.signal,
+                            manual
                         );
                     }
                     if (_classicBatchExtractAbort !== batchController || batchController.signal.aborted) break;
@@ -8086,7 +8076,7 @@ const app = createApp({
             const imageRequestUrl = `${baseUrl}/generate?tag=$1&token=${encodeURIComponent(imageGenToken)}&model=${settings.imageModel}&artist=${encodedTargetArtists}&size=${settings.imageSize}&steps=40&scale=6&cfg=0&sampler=k_dpmpp_2m_sde&negative={{{{bad anatomy}}}},{bad feet},bad hands,{{{bad proportions}}},{blurry},cloned face,cropped,{{{deformed}}},{{{disfigured}}},error,{{{extra arms}}},{extra digit},{{{extra legs}}},extra limbs,{{extra limbs}},{fewer digits},{{{fused fingers}}},gross proportions,ink eyes,ink hair,jpeg artifacts,{{{{long neck}}}},low quality,{malformed limbs},{{missing arms}},{missing fingers}},{{missing legs}},{{{more than 2 nipples}}},mutated hands,{{{mutation}}},normal quality,owres,{{poorly drawn face}},{{poorly drawn hands}},reen eyes,signature,text,{{too many fingers}},{{{ugly}}},username,uta,watermark,worst quality,{{{more than 2 legs}}},awkward hand sign,weird hand gesture,contorted hand,unnatural finger pose,deformed hand gesture,{shaka},{hang loose},{{rock on}},{shaka sign}&nocache=0&noise_schedule=karras`;
             const imageGenRegexContent = {
                 name: imageGenRegexName,
-                regex: '/image###([\\s\\S]*?)###/g',
+                regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
             replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button><button type="button" class="generated-image-save" title="保存图片" aria-label="保存图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
@@ -8108,7 +8098,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(6, Math.max(1, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(8, Math.max(2, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -8155,6 +8145,14 @@ const app = createApp({
                 }
                 if (msg.role === 'assistant' && msg.isSummaryOpen === undefined && hasThinkingOrTools(msg)) {
                     msg.isSummaryOpen = false;
+                }
+                if (msg.role === 'assistant' && Array.isArray(msg.styleFilterHits)) {
+                    msg.styleFilterHits = msg.styleFilterHits
+                        .map(normalizeStyleFilterHit)
+                        .filter(Boolean);
+                    if (!msg.styleFilterHits.length) delete msg.styleFilterHits;
+                } else {
+                    delete msg.styleFilterHits;
                 }
                 return msg;
             });
@@ -8348,55 +8346,46 @@ const app = createApp({
                 showToast('请选择需要删除的分支，主线不能删除', 'warning');
                 return;
             }
-            const childrenByParent = new Map();
-            storyBranches.value.forEach(branch => {
-                if (!childrenByParent.has(branch.parentId)) childrenByParent.set(branch.parentId, []);
-                childrenByParent.get(branch.parentId).push(branch.id);
-            });
-            const deleteIds = new Set();
-            const stack = [target.id];
-            while (stack.length > 0) {
-                const branchId = stack.pop();
-                if (deleteIds.has(branchId)) continue;
-                deleteIds.add(branchId);
-                stack.push(...(childrenByParent.get(branchId) || []));
-            }
-            const childCount = deleteIds.size - 1;
-            const childHint = childCount > 0 ? `及其 ${childCount} 条子分支` : '';
+            const parentId = storyBranches.value.some(branch => branch.id === target.parentId)
+                ? target.parentId
+                : STORY_BRANCH_MAIN_ID;
+            const parent = storyBranches.value.find(branch => branch.id === parentId);
+            const hasChildren = storyBranches.value.some(branch => branch.parentId === target.id);
             confirmAction(
-                `确定要删除“${target.name}”${childHint}吗？相关聊天、记忆和 UI 状态也会删除，此操作无法撤销。`,
+                `确定要删除“${target.name}”吗？${hasChildren ? `下级分支会顺延到“${parent?.name || '主线'}”下，` : ''}该分支的聊天、记忆和 UI 状态会被删除，此操作无法撤销。`,
                 async () => {
                     try {
-                        if (deleteIds.has(activeStoryBranchId.value)) {
-                            await switchStoryBranch(STORY_BRANCH_MAIN_ID, { closeModal: false, notify: false });
-                            if (activeStoryBranchId.value !== STORY_BRANCH_MAIN_ID) {
-                                throw new Error('无法切换到主线');
+                        if (target.id === activeStoryBranchId.value) {
+                            await switchStoryBranch(parentId, { closeModal: false, notify: false });
+                            if (activeStoryBranchId.value !== parentId) {
+                                throw new Error(`无法切换到“${parent?.name || '主线'}”`);
                             }
                         }
                         storyBranchSwitching.value = true;
                         if (!getMainDb()) await initDB();
-                        const scopeIds = [...deleteIds].map(branchId => getStoryBranchScopeId(char.uuid, branchId));
-                        await Promise.all(scopeIds.flatMap(scopeId => [
+                        const scopeId = getStoryBranchScopeId(char.uuid, target.id);
+                        await Promise.all([
                             deleteScopedStoredValue('chat', scopeId),
                             deleteScopedStoredValue('memories', scopeId),
                             deleteScopedStoredValue('classic_memories', scopeId)
-                        ]));
-                        scopeIds.forEach(scopeId => {
-                            delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
-                        });
+                        ]);
+                        delete memorySettings.emptyTurns?.[getMemoryEmptyTurnsKey(scopeId)];
                         getUiTemplatesForRuntime(char).forEach(template => {
                             if (!template.runtimeByCharacter) return;
-                            scopeIds.forEach(scopeId => delete template.runtimeByCharacter[scopeId]);
+                            delete template.runtimeByCharacter[scopeId];
                         });
-                        storyBranches.value = storyBranches.value.filter(branch => !deleteIds.has(branch.id));
-                        selectedStoryBranchId.value = activeStoryBranchId.value;
+                        storyBranches.value.forEach(branch => {
+                            if (branch.parentId === target.id) branch.parentId = parentId;
+                        });
+                        storyBranches.value = storyBranches.value.filter(branch => branch.id !== target.id);
+                        selectedStoryBranchId.value = parentId;
                         await Promise.all([
                             saveStoryBranchesForCharacter(char),
                             saveMemorySettingsNow(),
                             setStoredValue('global_ui_templates', globalUiTemplates.value),
                             saveCharactersNow()
                         ]);
-                        showToast(`已删除“${target.name}”${childHint}`, 'success');
+                        showToast(`已删除“${target.name}”${hasChildren ? '，下级分支已顺延保留' : ''}`, 'success');
                     } catch (error) {
                         console.error('Failed to delete story branch:', error);
                         showToast(`删除分支失败：${error.message || '请稍后重试'}`, 'error');
@@ -8558,6 +8547,7 @@ const app = createApp({
             const target = storyBranches.value.find(branch => branch.id === branchId);
             if (!char?.uuid || !target || branchId === activeStoryBranchId.value || storyBranchSwitching.value) return;
             clearPendingChatImages();
+            clearPendingCardInteraction();
             storyBranchSwitching.value = true;
             try {
                 if (!await saveCurrentStoryBranchState()) return;
@@ -8659,6 +8649,7 @@ const app = createApp({
                 return;
             }
             clearPendingChatImages();
+            clearPendingCardInteraction();
             const switchEpoch = ++_characterSwitchEpoch;
             const isLatestSwitch = () => switchEpoch === _characterSwitchEpoch;
             switchingCharacterIndex.value = index;
@@ -9162,23 +9153,17 @@ const app = createApp({
 
         // Expose triggerSlash for character cards (Defined early)
         window.triggerSlash = async (text) => {
-            if (!text) return;
+            const command = String(text || '').trim();
+            if (!command) return;
 
-            if (isGenerating.value) {
+            if (isConversationBusy.value) {
                 showToast('正在生成中，请稍后...', 'warning');
                 return;
             }
 
-            const startTime = Date.now(); // Record trigger time
-
-            // Add user message with explicit reactivity update
-            const newMessage = { role: 'user', content: text, isSelf: true, isTriggered: true, shouldAnimate: true, skipReveal: true };
-            // Push and force update to ensure v-if picks up the new property
-            chatHistory.value = [...chatHistory.value, newMessage];
-
+            pendingCardInteraction.value = command;
             await nextTick();
-
-            await generateResponse(startTime);
+            inputBox.value?.focus();
         };
 
         // Lifecycle
@@ -9272,31 +9257,53 @@ const app = createApp({
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
             const syncCotPresetContent = () => {
+                const uiTemplateAnalysisEnabled = settings.uiTemplateEnabled
+                    && settings.uiTemplateMainModelAnalysis
+                    && activeUiTemplates.value.length > 0;
+                const useThinkingOpening = usesThinkingCotTag(settings.model);
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
-                    uiTemplateAnalysisEnabled: settings.uiTemplateEnabled
-                        && settings.uiTemplateMainModelAnalysis
-                        && activeUiTemplates.value.length > 0
+                    uiTemplateAnalysisEnabled,
+                    useThinkingOpening
                 });
-                const existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                let existingCotPreset = presets.value.find(p => p.name === cotPresetName);
                 if (!existingCotPreset) {
                     presets.value.push({
                         name: cotPresetName,
                         content: cotPresetContent,
                         enabled: true
                     });
-                    return;
-                }
-                if (existingCotPreset.content !== cotPresetContent) {
+                    existingCotPreset = presets.value.find(p => p.name === cotPresetName);
+                } else if (existingCotPreset.content !== cotPresetContent) {
                     existingCotPreset.content = cotPresetContent;
                 }
+
+                const prefillEnabled = existingCotPreset?.enabled !== false;
+                BUILTIN_CORE_PRESETS.forEach(preset => {
+                    const prefillPhase = preset.name === '破限预注入 · AI 1' ? 1
+                        : preset.name === '破限预注入 · AI 2' ? 2
+                            : 0;
+                    if (!prefillPhase) return;
+                    const existingPreset = presets.value.find(item => item.name === preset.name);
+                    if (!existingPreset) return;
+                    existingPreset.content = buildCotPresetContent({
+                        memoryEnabled: memorySettings.enabled,
+                        uiTemplateAnalysisEnabled,
+                        useThinkingOpening,
+                        prefillPhase,
+                        prefillEnabled,
+                        prefillBaseContent: preset.content
+                    });
+                });
             };
             syncCotPresetContent();
             watch([
                 () => memorySettings.enabled,
                 () => settings.uiTemplateEnabled,
                 () => settings.uiTemplateMainModelAnalysis,
-                () => activeUiTemplates.value.length
+                () => activeUiTemplates.value.length,
+                () => settings.model,
+                () => presets.value.find(preset => preset.name === cotPresetName)?.enabled
             ], syncCotPresetContent);
             removeLegacyUserRegex();
 
@@ -9415,6 +9422,13 @@ const app = createApp({
         const processMainContent = (mainText, isGeneratingState) => {
             mainText = stripUiTemplateUpdateBlock(mainText);
             if (!isGeneratingState) return { text: mainText, showSpinner: false };
+            const imageStart = mainText.lastIndexOf('image###');
+            if (imageStart !== -1) {
+                const imageTail = mainText.slice(imageStart + 'image###'.length);
+                if (!imageTail.includes('###') && !/[\r\n]/.test(imageTail)) {
+                    mainText = mainText.slice(0, imageStart);
+                }
+            }
             const patterns = ['```html', '```vue', '<!DOCTYPE', '<div', '<style'];
             let earliestIndex = -1;
             for (const p of patterns) {
@@ -9433,7 +9447,7 @@ const app = createApp({
             const profile = userProfiles.value.find(p => p.uuid === id);
             if (profile) {
                 activeProfileId.value = id;
-                Object.assign(user, JSON.parse(JSON.stringify(profile)));
+                Object.assign(user, { preferences: '', ...JSON.parse(JSON.stringify(profile)) });
                 saveData();
                 showToast(`已切换为人设: ${user.name}`, 'success');
             }
@@ -9444,6 +9458,7 @@ const app = createApp({
                 uuid: generateUUID(),
                 name: '新人设',
                 description: '',
+                preferences: '',
                 avatar: null,
                 person: 'second'
             };
@@ -9586,563 +9601,6 @@ const app = createApp({
             if (thirdPersonPreset) thirdPersonPreset.enabled = user.person === 'third';
         };
 
-        // --- 明文备份（Plain Backup）---
-        // 138 起备份统一导出为可读的明文文件（角色卡 PNG + 聊天记录 JSONL），
-        // 通过原生桥分块传输，由原生打包为 zip 保存；导入同时兼容明文与旧内部数据。
-        const plainBackupChunkSize = 256 * 1024;
-
-        const bytesToBase64 = (bytes) => {
-            let binary = '';
-            const chunk = 0x8000;
-            for (let i = 0; i < bytes.length; i += chunk) {
-                binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunk, bytes.length)));
-            }
-            return btoa(binary);
-        };
-
-        const base64ToBytes = (base64) => {
-            const binary = atob(String(base64 || '').trim());
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-            return bytes;
-        };
-
-        const plainBackupSanitizeFileName = (name) => {
-            const cleaned = String(name || 'character').replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim();
-            return cleaned || 'character';
-        };
-
-        const sanitizePlainBackupContent = (content) => {
-            if (typeof content !== 'string' || !content) return content;
-            return content.replace(/data-image-request="([^"]*)"/g, (_match, url) => {
-                const cleaned = String(url).replace(/([?&])token=[^&]*/g, '$1');
-                return `data-image-request="${cleaned}"`;
-            });
-        };
-
-        const buildCharacterChatJsonl = async (index, stripImages = false) => {
-            const char = characters.value[index];
-            if (!char) return null;
-            if (!getMainDb()) await initDB();
-            const isCurrentCharacter = currentCharacterIndex.value === index;
-            if (isCurrentCharacter) await flushPendingChatHistorySave();
-            const savedBranches = char.uuid ? await getScopedStoredValue('branches', char.uuid) : null;
-            const branches = isCurrentCharacter
-                ? cloneForStorage(storyBranches.value)
-                : normalizeStoryBranches(char, savedBranches);
-            const activeBranchId = isCurrentCharacter
-                ? activeStoryBranchId.value
-                : String(savedBranches?.activeBranchId || STORY_BRANCH_MAIN_ID);
-            const branchChats = await Promise.all(branches.map(async branch => {
-                let messages;
-                if (isCurrentCharacter && branch.id === activeStoryBranchId.value) {
-                    messages = cloneForStorage(chatHistory.value);
-                } else if (char.uuid) {
-                    messages = await getScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, branch.id));
-                }
-                if (messages === undefined && branch.id === STORY_BRANCH_MAIN_ID) {
-                    messages = await getScopedStoredValue('chat', index);
-                }
-                messages = Array.isArray(messages) ? cloneForStorage(messages) : [];
-                messages = messages.map(message => {
-                    const result = { ...message };
-                    let changed = false;
-                    if (typeof message?.content === 'string' && message.content.includes('data-image-request')) {
-                        const sanitized = sanitizePlainBackupContent(message.content);
-                        if (sanitized !== message.content) {
-                            result.content = sanitized;
-                            changed = true;
-                        }
-                    }
-                    if (stripImages) {
-                        if (Array.isArray(message?.imageAttachments) && message.imageAttachments.length) {
-                            result.imageAttachments = [];
-                            changed = true;
-                        }
-                        if (typeof message?.avatar === 'string' && message.avatar.startsWith('data:')) {
-                            result.avatar = '';
-                            changed = true;
-                        }
-                    }
-                    return changed ? result : message;
-                });
-                return { branchId: branch.id, messages };
-            }));
-            const totalMessages = branchChats.reduce((sum, branch) => sum + branch.messages.length, 0);
-            if (!totalMessages) return null;
-            const chatByBranch = new Map(branchChats.map(branch => [branch.branchId, branch.messages]));
-            const branchMetadata = branches.map(branch => {
-                const messages = chatByBranch.get(branch.id) || [];
-                return {
-                    ...branch,
-                    floorCount: getPostprocessedChatMessages(messages, { includeSystem: false }).length,
-                    messageCount: messages.filter(message => ['user', 'assistant'].includes(message?.role)).length,
-                    wordCount: getConversationBodyLength(messages)
-                };
-            });
-            const manifest = {
-                type: STORY_BRANCH_CHAT_EXPORT_TYPE,
-                version: STORY_BRANCH_CHAT_EXPORT_VERSION,
-                characterName: char.name || '',
-                exportedAt: new Date().toISOString(),
-                activeBranchId: branchMetadata.some(branch => branch.id === activeBranchId) ? activeBranchId : STORY_BRANCH_MAIN_ID,
-                branches: branchMetadata
-            };
-            const lines = [manifest, ...branchChats].map(record => JSON.stringify(record)).join('\n');
-            return { lines, characterName: char.name || '' };
-        };
-
-        const buildCharacterMemoriesJson = async (char) => {
-            if (!char?.uuid) return null;
-            const savedBranches = await getScopedStoredValue('branches', char.uuid);
-            const branches = normalizeStoryBranches(char, savedBranches);
-            const memoryBranches = [];
-            for (const branch of branches) {
-                const scopeId = getStoryBranchScopeId(char.uuid, branch.id);
-                const vectorMemories = await getScopedStoredValue('memories', scopeId);
-                const classicMemories = await getScopedStoredValue('classic_memories', scopeId);
-                const vectorArr = Array.isArray(vectorMemories) ? vectorMemories : [];
-                const classicArr = Array.isArray(classicMemories) ? classicMemories : [];
-                if (!vectorArr.length && !classicArr.length) continue;
-                memoryBranches.push({
-                    branchId: branch.id,
-                    branchName: branch.name,
-                    vectorMemories: vectorArr,
-                    classicMemories: classicArr
-                });
-            }
-            if (!memoryBranches.length) return null;
-            return JSON.stringify({ characterName: char.name || '', branches: memoryBranches }, null, 2);
-        };
-
-        const GLOBAL_BACKUP_KEYS = [
-            'settings', 'presets', 'global_regex', 'global_worldinfo', 'worldinfo_settings',
-            'global_ui_templates', 'active_tools', 'user', 'user_profiles', 'active_profile_id',
-            'memory_settings', 'token_usage_history'
-        ];
-
-        const buildGlobalDataFiles = async () => {
-            const files = [];
-            for (const key of GLOBAL_BACKUP_KEYS) {
-                try {
-                    let value = await getStoredValue(key);
-                    if (value === undefined || value === null) continue;
-                    if (key === 'settings') {
-                        value = cloneForStorage(value);
-                        delete value.apiKey;
-                        delete value.apiProviderKeys;
-                        delete value.imageGenKey;
-                    } else if (key === 'active_tools') {
-                        value = cloneForStorage(value);
-                        if (Array.isArray(value)) {
-                            value.forEach(tool => {
-                                if (tool && typeof tool === 'object') delete tool.tavilyApiKey;
-                            });
-                        }
-                    }
-                    files.push({ path: 'data/' + key + '.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(value, null, 2)) });
-                } catch (e) {
-                    console.error('Plain backup global data error for', key, e);
-                }
-            }
-            return files;
-        };
-
-        const collectPlainBackupFiles = async (onProgress, stripImages = false) => {
-            const totalSteps = characters.value.length;
-            const charManifest = new Array(totalSteps);
-            const perCharFiles = new Array(totalSteps);
-            let completed = 0;
-            let cursor = 0;
-            const CONCURRENCY = Math.min(4, totalSteps);
-            const workers = Array.from({ length: CONCURRENCY }, async () => {
-                while (cursor < totalSteps) {
-                    const i = cursor;
-                    cursor += 1;
-                    const char = characters.value[i];
-                    const name = plainBackupSanitizeFileName(char.name);
-                    const localFiles = [];
-                    try {
-                        const v2Data = buildCharacterExportData(char);
-                        const avatarSrc = String(char.avatar || '');
-                        const isRemoteAvatar = avatarSrc.startsWith('http://') || avatarSrc.startsWith('https://');
-                        const pngBytes = await cardUtils.imageUrlToPngBytes(
-                            avatarSrc,
-                            isRemoteAvatar ? { crossOrigin: 'Anonymous' } : {}
-                        );
-                        const finalPng = cardUtils.injectPngTextChunk(pngBytes, 'chara', cardUtils.encodeBase64Utf8(JSON.stringify(v2Data)));
-                        localFiles.push({ path: 'characters/' + name + '_' + i + '.png', base64: bytesToBase64(finalPng) });
-                    } catch (pngErr) {
-                        console.error('Plain backup PNG error for', char.name, pngErr);
-                    }
-                    try {
-                        const chat = await buildCharacterChatJsonl(i, stripImages);
-                        if (chat) {
-                            localFiles.push({ path: 'chats/' + name + '_' + i + '.jsonl', base64: cardUtils.encodeBase64Utf8(chat.lines) });
-                        }
-                    } catch (chatErr) {
-                        console.error('Plain backup chat error for', char.name, chatErr);
-                    }
-                    try {
-                        const memoriesJson = await buildCharacterMemoriesJson(char);
-                        if (memoriesJson) {
-                            localFiles.push({ path: 'memories/' + name + '_' + i + '.json', base64: cardUtils.encodeBase64Utf8(memoriesJson) });
-                        }
-                    } catch (memoryErr) {
-                        console.error('Plain backup memories error for', char.name, memoryErr);
-                    }
-                    charManifest[i] = { index: i, name: char.name || '', uuid: char.uuid || null };
-                    perCharFiles[i] = localFiles;
-                    completed += 1;
-                    if (onProgress) onProgress(completed, totalSteps, 'collect');
-                }
-            });
-            await Promise.all(workers);
-
-            const files = [];
-            for (let i = 0; i < totalSteps; i += 1) {
-                if (perCharFiles[i]) files.push(...perCharFiles[i]);
-            }
-            const globalDataFiles = await buildGlobalDataFiles();
-            files.push(...globalDataFiles);
-            const manifest = {
-                format: 'rphub-plain-backup',
-                version: 1,
-                exportedAt: new Date().toISOString(),
-                characters: charManifest.filter(Boolean)
-            };
-            files.push({ path: 'manifest.json', base64: cardUtils.encodeBase64Utf8(JSON.stringify(manifest, null, 2)) });
-            return files;
-        };
-
-        const exportAllPlainBackup = async (stripImages = false) => {
-            try {
-                showToast(stripImages
-                    ? '正在导出精简备份（不含图片）…，进度见通知栏'
-                    : '正在导出完整备份…，进度见通知栏', 'info');
-                const native = window.RoleplayHubNative;
-                if (!native || typeof native.beginPlainBackup !== 'function') {
-                    showToast('当前环境不支持明文备份', 'error');
-                    return;
-                }
-                const safeProgress = (done, total, stage) => {
-                    try {
-                        if (native && typeof native.onBackupProgress === 'function') {
-                            native.onBackupProgress(done, total, stage);
-                        }
-                    } catch (_) { /* 原生不可用时静默 */ }
-                };
-                await saveData({ saveMemories: true, saveCharacters: true });
-                const files = await collectPlainBackupFiles(safeProgress, stripImages);
-                if (!files.length) {
-                    showToast('没有可导出的数据', 'warning');
-                    return;
-                }
-                native.beginPlainBackup(files.length);
-                for (let i = 0; i < files.length; i += 1) {
-                    await yieldToUi();
-                    const file = files[i];
-                    native.beginPlainBackupFile(file.path, file.base64.length);
-                    for (let off = 0; off < file.base64.length; off += plainBackupChunkSize) {
-                        native.addPlainBackupChunk(file.base64.substring(off, off + plainBackupChunkSize));
-                    }
-                    native.endPlainBackupFile();
-                    safeProgress(i + 1, files.length, 'transfer');
-                }
-                native.finishPlainBackup();
-                showToast('正在生成明文备份…', 'info');
-            } catch (e) {
-                console.error('Plain backup export error:', e);
-                showToast('明文备份导出失败: ' + (e?.message || e), 'error', 5000);
-            }
-        };
-
-        const buildCharacterFromImport = (rawData, avatarUrl) => {
-            const imported = cardUtils.parseImportedCharacterCard(rawData);
-            return {
-                name: imported.name,
-                description: imported.description,
-                first_mes: imported.first_mes,
-                avatar: avatarUrl || defaultAvatar,
-                personality: imported.personality,
-                creator_notes: imported.creator_notes,
-                worldInfo: imported.worldInfoEntries
-                    .map(entry => normalizeWorldInfoEntry({ ...entry, scope: 'character' }))
-                    .filter(entry => entry.scope !== 'global'),
-                regexScripts: imported.regexScripts
-                    .map(script => cardUtils.normalizeImportedRegexScript(
-                        { ...script, scope: 'character' },
-                        { fallbackScope: 'character', systemNames: systemRegexNames }
-                    ))
-                    .filter(script => script.scope !== 'global'),
-                uiTemplates: imported.uiTemplates.map(template => normalizeUiTemplate({
-                    ...sanitizeUiTemplateImportEntry(template),
-                    id: generateUUID(),
-                    scope: 'character'
-                })),
-                recentGenerationTimes: [],
-                uuid: generateUUID(),
-                createdAt: Date.now()
-            };
-        };
-
-        const importChatJsonlForCharacter = async (char, text) => {
-            const records = String(text || '')
-                .split(/\r?\n/)
-                .filter(line => line.trim())
-                .map(line => JSON.parse(line));
-            if (!records.length) return 0;
-            if (records.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
-                throw new Error('聊天记录包含无效消息');
-            }
-            if (records[0]?.type === STORY_BRANCH_CHAT_EXPORT_TYPE) {
-                const manifest = records[0];
-                if (Number(manifest.version) !== STORY_BRANCH_CHAT_EXPORT_VERSION) {
-                    throw new Error('不支持的分支聊天版本：' + manifest.version);
-                }
-                if (!Array.isArray(manifest.branches) || !manifest.branches.length) {
-                    throw new Error('文件中没有分支信息');
-                }
-                const chatByBranch = new Map();
-                records.slice(1).forEach(record => {
-                    const branchId = String(record?.branchId || '').trim();
-                    if (!branchId || !Array.isArray(record?.messages)) throw new Error('分支聊天数据不完整');
-                    if (record.messages.some(message => !message || typeof message !== 'object' || Array.isArray(message))) {
-                        throw new Error('分支"' + branchId + '"包含无效消息');
-                    }
-                    if (chatByBranch.has(branchId)) throw new Error('分支"' + branchId + '"重复');
-                    chatByBranch.set(branchId, cloneForStorage(record.messages));
-                });
-                const importedBranches = normalizeStoryBranches(char, { branches: manifest.branches });
-                importedBranches.forEach(branch => {
-                    if (!chatByBranch.has(branch.id)) throw new Error('缺少分支"' + branch.name + '"的聊天记录');
-                    const messages = chatByBranch.get(branch.id);
-                    branch.floorCount = getPostprocessedChatMessages(messages, { includeSystem: false }).length;
-                    branch.messageCount = messages.filter(message => ['user', 'assistant'].includes(message.role)).length;
-                    branch.wordCount = getConversationBodyLength(messages);
-                });
-                const importedIds = new Set(importedBranches.map(branch => branch.id));
-                if ([...chatByBranch.keys()].some(branchId => !importedIds.has(branchId))) {
-                    throw new Error('聊天记录中包含未知分支');
-                }
-                const importedActiveId = importedIds.has(String(manifest.activeBranchId))
-                    ? String(manifest.activeBranchId)
-                    : STORY_BRANCH_MAIN_ID;
-                await Promise.all([
-                    ...importedBranches.map(branch => setScopedStoredValue(
-                        'chat',
-                        getStoryBranchScopeId(char.uuid, branch.id),
-                        chatByBranch.get(branch.id),
-                        { clone: false }
-                    )),
-                    setScopedStoredValue('branches', char.uuid, {
-                        version: 1,
-                        activeBranchId: importedActiveId,
-                        branches: cloneForStorage(importedBranches)
-                    }, { clone: false })
-                ]);
-                return [...chatByBranch.values()].reduce((sum, messages) => sum + messages.length, 0);
-            }
-            const importedChat = cloneForStorage(records);
-            await setScopedStoredValue('chat', getStoryBranchScopeId(char.uuid, STORY_BRANCH_MAIN_ID), importedChat, { clone: false });
-            await setScopedStoredValue('branches', char.uuid, {
-                version: 1,
-                activeBranchId: STORY_BRANCH_MAIN_ID,
-                branches: normalizeStoryBranches(char, null)
-            }, { clone: false });
-            return importedChat.length;
-        };
-
-        const clearAllDataForRestore = async () => {
-            if (!getMainDb()) await initDB();
-            const mainKeys = await readStorageKeys(getMainDb());
-            const legacyKeys = getLegacyDb() ? await readStorageKeys(getLegacyDb()) : [];
-            if (mainKeys.length) await deleteStorageKeys(getMainDb(), mainKeys);
-            if (legacyKeys.length) await deleteStorageKeys(getLegacyDb(), legacyKeys);
-        };
-
-        const importAllPlainBackupFiles = async (files) => {
-            if (!Array.isArray(files) || !files.length) return '备份中没有数据';
-
-            // 恢复采用覆盖语义：先清空本地全部数据，仅保留设备本地的密钥
-            const currentSettings = await getStoredValue('settings');
-            const currentActiveTools = await getStoredValue('active_tools');
-            const keptSecrets = {
-                apiKey: currentSettings?.apiKey,
-                apiProviderKeys: currentSettings?.apiProviderKeys,
-                imageGenKey: currentSettings?.imageGenKey,
-                tavilyByTool: (Array.isArray(currentActiveTools) ? currentActiveTools : [])
-                    .filter(tool => tool && typeof tool === 'object' && tool.tavilyApiKey !== undefined)
-                    .map(tool => ({ id: tool.id, callName: tool.callName, tavilyApiKey: tool.tavilyApiKey }))
-            };
-            await clearAllDataForRestore();
-            characters.value = [];
-            clearCurrentCharacterData();
-
-            const charFiles = files.filter(file => (file.path || '').startsWith('characters/'));
-            const chatFiles = files.filter(file => (file.path || '').startsWith('chats/'));
-            const nameToChar = new Map();
-
-            let importedChars = 0;
-            for (const file of charFiles) {
-                try {
-                    const path = file.path || '';
-                    if (path.toLowerCase().endsWith('.png')) {
-                        const bytes = base64ToBytes(file.base64);
-                        const { data } = cardUtils.parsePngCharacterData(bytes.buffer);
-                        const blob = new Blob([bytes], { type: 'image/png' });
-                        const avatarUrl = await cardUtils.blobToDataUrl(blob);
-                        const char = buildCharacterFromImport(data, avatarUrl);
-                        characters.value.push(char);
-                        nameToChar.set(char.name, char);
-                        importedChars += 1;
-                    } else if (path.toLowerCase().endsWith('.json')) {
-                        const text = cardUtils.decodeBase64Utf8(file.base64);
-                        const data = JSON.parse(text);
-                        const char = buildCharacterFromImport(data, null);
-                        characters.value.push(char);
-                        nameToChar.set(char.name, char);
-                        importedChars += 1;
-                    }
-                } catch (e) {
-                    console.error('Import character failed:', file.path, e);
-                }
-            }
-
-            let importedMessages = 0;
-            for (const file of chatFiles) {
-                try {
-                    const text = cardUtils.decodeBase64Utf8(file.base64);
-                    const records = text.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line));
-                    const characterName = records[0]?.characterName || '';
-                    const char = nameToChar.get(characterName);
-                    if (!char) {
-                        console.warn('找不到对应角色，跳过聊天记录:', characterName);
-                        continue;
-                    }
-                    importedMessages += await importChatJsonlForCharacter(char, text);
-                } catch (e) {
-                    console.error('Import chat failed:', file.path, e);
-                }
-            }
-
-            let importedMemories = 0;
-            const memoryFiles = files.filter(file => (file.path || '').startsWith('memories/'));
-            for (const file of memoryFiles) {
-                try {
-                    const text = cardUtils.decodeBase64Utf8(file.base64);
-                    const data = JSON.parse(text);
-                    const char = nameToChar.get(data.characterName);
-                    if (!char) {
-                        console.warn('找不到对应角色，跳过记忆:', data.characterName);
-                        continue;
-                    }
-                    if (!Array.isArray(data.branches)) continue;
-                    for (const branch of data.branches) {
-                        const scopeId = getStoryBranchScopeId(char.uuid, branch.branchId);
-                        if (Array.isArray(branch.vectorMemories) && branch.vectorMemories.length) {
-                            await setScopedStoredValue('memories', scopeId, branch.vectorMemories, { clone: false });
-                        }
-                        if (Array.isArray(branch.classicMemories) && branch.classicMemories.length) {
-                            await setScopedStoredValue('classic_memories', scopeId, branch.classicMemories, { clone: false });
-                        }
-                    }
-                    importedMemories += 1;
-                } catch (e) {
-                    console.error('Import memories failed:', file.path, e);
-                }
-            }
-
-            let importedGlobals = 0;
-            const dataFiles = files.filter(file => (file.path || '').startsWith('data/'));
-            for (const file of dataFiles) {
-                try {
-                    const key = (file.path || '').replace(/^data\//, '').replace(/\.json$/i, '');
-                    if (!key) continue;
-                    let value = JSON.parse(cardUtils.decodeBase64Utf8(file.base64));
-                    if (key === 'settings') {
-                        if (value.apiKey === undefined && keptSecrets.apiKey !== undefined) value.apiKey = keptSecrets.apiKey;
-                        if (value.apiProviderKeys === undefined && keptSecrets.apiProviderKeys !== undefined) value.apiProviderKeys = keptSecrets.apiProviderKeys;
-                        if (value.imageGenKey === undefined && keptSecrets.imageGenKey !== undefined) value.imageGenKey = keptSecrets.imageGenKey;
-                    } else if (key === 'active_tools') {
-                        if (Array.isArray(value)) {
-                            const secretById = new Map();
-                            const secretByName = new Map();
-                            keptSecrets.tavilyByTool.forEach(secret => {
-                                if (secret.id) secretById.set(secret.id, secret.tavilyApiKey);
-                                if (secret.callName) secretByName.set(secret.callName, secret.tavilyApiKey);
-                            });
-                            value = value.map(tool => {
-                                if (!tool || typeof tool !== 'object' || tool.tavilyApiKey !== undefined) return tool;
-                                const match = secretById.get(tool.id) ?? secretByName.get(tool.callName);
-                                if (match !== undefined) return { ...tool, tavilyApiKey: match };
-                                return tool;
-                            });
-                        }
-                    }
-                    await setStoredValue(key, value, { clone: false });
-                    importedGlobals += 1;
-                } catch (e) {
-                    console.error('Import global data failed:', file.path, e);
-                }
-            }
-
-            if (!getMainDb()) await initDB();
-            await saveCharactersNow();
-            return '导入完成：' + importedChars + ' 个角色，' + importedMessages + ' 条聊天记录，' + importedMemories + ' 个角色记忆，' + importedGlobals + ' 项全局数据';
-        };
-
-        const plainBackupImportState = {
-            files: [],
-            currentPath: '',
-            currentBase64: ''
-        };
-
-        const importBeginPlainBackup = (count) => {
-            plainBackupImportState.files = [];
-            plainBackupImportState.currentPath = '';
-            plainBackupImportState.currentBase64 = '';
-        };
-
-        const importFileChunkPlainBackup = (path, base64, isLast) => {
-            const state = plainBackupImportState;
-            if (state.currentPath !== path) {
-                if (state.currentPath) {
-                    state.files.push({ path: state.currentPath, base64: state.currentBase64 });
-                }
-                state.currentPath = path;
-                state.currentBase64 = '';
-            }
-            state.currentBase64 += base64;
-            if (isLast) {
-                state.files.push({ path: state.currentPath, base64: state.currentBase64 });
-                state.currentPath = '';
-                state.currentBase64 = '';
-            }
-        };
-
-        const importFinishPlainBackup = async () => {
-            const files = plainBackupImportState.files;
-            plainBackupImportState.files = [];
-            plainBackupImportState.currentPath = '';
-            plainBackupImportState.currentBase64 = '';
-            try {
-                const message = await importAllPlainBackupFiles(files);
-                showToast(message, 'success', 4000);
-            } catch (e) {
-                console.error('Plain backup import error:', e);
-                showToast('明文备份导入失败: ' + (e?.message || e), 'error', 5000);
-            }
-            setTimeout(() => location.reload(), 1600);
-        };
-
-        window.RPHubPlainBackup = {
-            exportAll: exportAllPlainBackup,
-            importBegin: importBeginPlainBackup,
-            importFileChunk: importFileChunkPlainBackup,
-            importFinish: importFinishPlainBackup
-        };
-
         return {
             switchProfile, createNewProfile, deleteProfile, userProfiles, activeProfileId, showProfileDropdown,
             processMainContent, replaceUserNamePlaceholder,
@@ -10162,14 +9620,16 @@ const app = createApp({
             tokenUsageHistory, tokenUsagePage, tokenUsagePageCount, tokenUsageFilter, tokenUsageTimeFilter,
             showTokenUsageTimeFilter, tokenUsageTimeFilterOptions, tokenUsageTimeFilterLabel,
             filteredTokenUsageHistory, tokenUsageStats, displayedTokenUsageHistory,
+            latestMainTokenUsage, formatLatestTokenCount, formatLatestUsageCost,
             getUncachedInputTokens, formatTokenCount, formatTokenAggregate, formatTokenUsageTime, getTokenUsageTypeLabel, clearTokenUsageHistory,
             storageStats, refreshStorageStats, cleanupUnusedStorage, formatStorageSize,
             showCharacterExportModal, openCharacterExportModal, confirmCharacterExport, // Character Export Modal
             showConfirmModal, confirmMessage, modelMode, chatModelSlots, selectChatModelSlot, reasoningEffortSlider, reasoningEffortLabel, showNoMemoryNeededModal, // Export for template
-            isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
+            isGenerating, isRemoteGenerating, remoteEstimatedTime, isReceiving, isThinking, hasActiveToolInlineWork, isConversationBusy, activeToolContinuationMessageId, activeToolContinuationHasResponse, userInput, pendingCardInteraction, clearPendingCardInteraction, pendingChatImages, pendingChatImageReadCount, isRecognizingImages, requestChatImageSelection, handleChatImageSelection, removePendingChatImage, modelSearchQuery, activeModelTag, modelTags, characterSearchQuery, filteredModels, filteredCharacters,
             user, settings, apiProviderOptions, selectedApiProvider, isCustomApiProvider, customApiProviderOptions, showApiProviderSelector, selectApiProvider, characters, currentCharacter, currentCharacterIndex, switchingCharacterIndex, chatHistory, displayedChatMessages, handleChatScroll, presets, presetRoleOptions, fontFamilyOptions, fontSizeOptions, availableImageStyleOptions, imageModelOptions, imageSizeOptions, imageGenCountOptions, scopeOptions, uiTemplatePlacementOptions, worldInfoPositionOptions, getPresetRoleLabel, getPresetRoleDisplayLabel, getPresetRoleBadgeClass, regexScripts, worldInfo,
             activeTools, activeToolAggressivenessOptions: ACTIVE_TOOL_AGGRESSIVENESS_OPTIONS, editingActiveTool, normalizeActiveTools, isWebActiveTool, getActiveToolDisplayDescription, getActiveToolResultCountMin, getActiveToolResultCountMax,
             getToolCallModeText, hasThinkingOrTools, isMessageThinkingOrRunning, isThinkingSummaryOpen, toggleThinkingSummary, markThinkingSummaryDetailOpened, getTimelineSteps,
+            isStyleFilterDetailsOpen, toggleStyleFilterDetails, getStyleFilterHitSegments,
             chatRoundStats, conversationBodyLength, summaryCompressedBodyLength, summaryCompressionRate,
             editingCharacter, editingPreset, editingUiTemplate, toasts, chatContainer, isChatFullscreen, isMobileKeyboardOpen, inputBox, messageElements,
             isGeneratorLoading, generatorUrl, onGeneratorLoad, // Generator exports
@@ -10178,7 +9638,7 @@ const app = createApp({
             editorTab, characterDisplayLimit, hasOpenedCharacterManager, isDesktopCharacterLayout, displayedCharacters, loadMoreCharacters,
             isAutoImageGenEnabled,
             apiStatus, apiLatency, imageGenStatus, imageGenLatency, checkAllStatuses, // Status Exports
-            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll, handleGeneratedImageSave,
+            toggleAutoImageGen, setWorldInfoEnabled, handleGeneratedImageReroll, handleGeneratedImageSave, handleGeneratedImageAction,
             quotaValue, quotaLoading, quotaError,
             // Memory System Exports
             classicMemoryPage, classicMemoryPageCount, memorySettings, retryingClassicMemoryId, retryClassicMemory,
@@ -10341,7 +9801,7 @@ const app = createApp({
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, selectQuickModels,             sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,

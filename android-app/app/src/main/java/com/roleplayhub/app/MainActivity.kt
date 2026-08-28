@@ -570,7 +570,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doSaveImage(url: String) {
-        ImageSaver.saveImageFromUrl(url) { _, message ->
+        ImageSaver.saveImageFromUrl(url, this) { _, message ->
             runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }
         }
     }

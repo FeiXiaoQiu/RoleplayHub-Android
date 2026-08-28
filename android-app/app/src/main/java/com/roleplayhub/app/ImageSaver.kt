@@ -1,5 +1,7 @@
 package com.roleplayhub.app
 
+import android.content.Context
+import android.media.MediaScannerConnection
 import android.os.Environment
 import java.io.File
 import java.net.HttpURLConnection
@@ -9,29 +11,32 @@ import java.util.Locale
 object ImageSaver {
 
     private const val DIR_NAME = "RPHub"
-    private const val NOMEDIA_CONTENT = "/storage/emulated/0/Download/RPHub/"
+    private const val NOMEDIA_CONTENT = "/storage/emulated/0/Download/RPHub"
 
-    fun saveImageFromUrl(url: String, onResult: (Boolean, String) -> Unit) {
+    fun saveImageFromUrl(url: String, context: android.content.Context, onResult: (Boolean, String) -> Unit) {
         Thread {
             try {
-                val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), DIR_NAME)
-                val created = !dir.exists() && dir.mkdirs()
-                if (!dir.exists()) {
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                val dir = File(downloadsDir, DIR_NAME)
+                if (!dir.exists() && !dir.mkdirs()) {
                     throw Exception("无法创建下载目录")
                 }
-                if (created) {
-                    try {
-                        File(dir, ".nomedia").writeText(NOMEDIA_CONTENT)
-                    } catch (e: Exception) {
-                        // 忽略 .nomedia 写入失败
+                try {
+                    val nomedia = File(dir, ".nomedia")
+                    if (!nomedia.exists()) {
+                        nomedia.writeText(NOMEDIA_CONTENT)
                     }
+                } catch (e: Exception) {
+                    // 忽略 .nomedia 写入失败
                 }
                 val (bytes, mime) = when {
                     url.startsWith("data:") -> parseDataUrl(url)
                     else -> download(url)
                 }
                 val name = "roleplayhub_" + System.currentTimeMillis() + "." + extensionForMime(mime)
-                File(dir, name).writeBytes(bytes)
+                val file = File(dir, name)
+                file.writeBytes(bytes)
+                MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), arrayOf(mime), null)
                 onResult(true, "图片已保存到 Download/RPHub")
             } catch (e: Exception) {
                 onResult(false, "保存失败：" + (e.message ?: "未知错误"))
