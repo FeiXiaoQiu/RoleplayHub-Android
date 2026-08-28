@@ -345,7 +345,8 @@
         confirm,
         ensureStorage,
         generateUUID,
-        getCharacterName,
+        getApiKey,
+        getApiUrl,
         normalizeApiUsage,
         saveStoredValue,
         toast
@@ -418,6 +419,13 @@
             const start = (tokenUsagePage.value - 1) * pageSize;
             return filteredTokenUsageHistory.value.slice(start, start + pageSize);
         });
+        const latestMainTokenUsage = computed(() => tokenUsageHistory.value.find(
+            record => record.type === 'chat' || record.type === 'tool_continuation'
+        ) || null);
+        const formatLatestTokenCount = value => `${(Number(value || 0) / 1000).toFixed(2)}k`;
+        const formatLatestUsageCost = quota => Number.isFinite(quota)
+            ? `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`
+            : '--';
 
         let saveQueue = Promise.resolve();
         const saveTokenUsageHistoryNow = () => {
@@ -429,16 +437,51 @@
             saveQueue = saveQueue.then(saveTask, saveTask);
             return saveQueue;
         };
+        const fetchLatestQuota = async (record, apiKey) => {
+            try {
+                const getLogKey = log => String(log?.request_id || [log?.created_at, log?.model_name, log?.prompt_tokens, log?.completion_tokens].join('|'));
+                for (const delay of [500, 5000]) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    const apiRoot = record.apiUrl.replace(/\/+$/, '').replace(/\/v1$/i, '');
+                    const response = await fetch(`${apiRoot}/api/log/token`, {
+                        headers: { Authorization: `Bearer ${apiKey}` }
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const payload = await response.json();
+                    const logs = Array.isArray(payload?.data) ? payload.data : (payload?.data?.items || []);
+                    const claimedLogs = new Set(tokenUsageHistory.value.map(item => item.usageLogKey).filter(Boolean));
+                    const log = logs.filter(item => !claimedLogs.has(getLogKey(item))
+                        && Number(item?.type) === 2
+                        && String(item?.model_name || '') === record.model
+                        && Math.abs(Number(item?.created_at) * 1000 - record.timestamp) < 120000
+                        && (!Number.isFinite(record.inputTokens) || Number(item?.prompt_tokens) === record.inputTokens)
+                        && (!Number.isFinite(record.outputTokens) || Number(item?.completion_tokens) === record.outputTokens))
+                        .sort((a, b) => Math.abs(Number(a.created_at) * 1000 - record.timestamp) - Math.abs(Number(b.created_at) * 1000 - record.timestamp))[0];
+                    if (!log || !Number.isFinite(Number(log.quota))) continue;
+                    record.actualQuota = Number(log.quota);
+                    record.usageGroup = String(log.group || '');
+                    record.usageLogKey = getLogKey(log);
+                    saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));
+                    return;
+                }
+            } catch (error) {
+                console.warn('New API usage log fetch failed:', error);
+            }
+        };
         const recordApiUsage = (usage, meta = {}) => {
-            tokenUsageHistory.value.unshift({
+            const record = reactive({
                 id: generateUUID(),
                 timestamp: Date.now(),
                 type: meta.type || 'chat',
                 model: String(meta.model || ''),
-                detail: String(meta.detail || ''),
-                characterName: getCharacterName(),
+                apiUrl: String(getApiUrl?.() || ''),
+                durationMs: Number.isFinite(meta.durationMs) ? Math.max(0, meta.durationMs) : null,
+                outputCharacters: Number.isFinite(meta.outputCharacters) ? Math.max(0, meta.outputCharacters) : null,
                 ...normalizeApiUsage(usage)
             });
+            tokenUsageHistory.value.unshift(record);
+            const apiKey = String(getApiKey?.() || '').trim();
+            if (record.apiUrl && apiKey) fetchLatestQuota(record, apiKey);
             saveTokenUsageHistoryNow().catch(error => console.error('Token usage history save failed:', error));
         };
         const clearTokenUsageHistory = () => {
@@ -457,6 +500,8 @@
             clearTokenUsageHistory,
             displayedTokenUsageHistory,
             filteredTokenUsageHistory,
+            formatLatestTokenCount,
+            formatLatestUsageCost,
             formatTokenAggregate: (value, reports) => {
                 if (reports <= 0 || value <= 0) return '0';
                 if (value >= 100000000) return `${Number((value / 100000000).toFixed(2))}亿`;
@@ -467,6 +512,7 @@
             formatTokenUsageTime: (timestamp) => new Date(timestamp).toLocaleString('zh-CN', { hour12: false }),
             getTokenUsageTypeLabel: (type) => ({ chat: '主对话', memory: '记忆系统', variables: '变量分析' })[getTokenUsageCategory(type)],
             getUncachedInputTokens,
+            latestMainTokenUsage,
             recordApiUsage,
             saveTokenUsageHistoryNow,
             showTokenUsageTimeFilter,
