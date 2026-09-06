@@ -5,16 +5,18 @@
     <meta charset="UTF-8">
     <meta name="viewport"
         content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
-    <meta name="rphub-presence-api" content="https://rphub-presence.zeabur.app">
+    <meta name="rphub-update-api" content="https://rphub-presence.zeabur.app">
     <title>RP Hub</title>
     <!-- GitHub Pages rebuild marker for CSS-only animation update. -->
     <!-- <link rel="icon" href="logo.jpg" type="image/jpeg"> -->
-    <link rel="stylesheet" href="assets/vendor/fonts/lora.css">
-    <script src="assets/vendor/tailwind.js"></script>
-    <script src="assets/vendor/vue.global.prod.js"></script>
-    <script src="assets/vendor/marked.min.js"></script>
-    <script src="assets/vendor/purify.min.js"></script>
-    <script src="assets/vendor/sortable.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -1027,7 +1029,7 @@
                         </div>
                         <div class="relative w-full flex items-end gap-2 px-1">
                             <textarea v-model="userInput" @input="autoResizeInput" @focus="handleChatInputFocus"
-                                @blur="handleChatInputBlur"
+                                @blur="handleChatInputBlur" @keydown.enter.exact.prevent="sendMessage"
                                 :placeholder="'输入消息...'"
                                 class="flex-1 bg-gray-100/70 text-gray-800 rounded-2xl px-4 py-2.5 md:px-4 md:py-2.5 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:border-primary-400 resize-none border border-transparent shadow-inner transition-all focus:bg-white chat-input-scrollbar min-h-[44px] md:min-h-[46px] max-h-[140px] md:max-h-[160px]"
                                 rows="1" ref="inputBox"></textarea>
@@ -1246,7 +1248,7 @@
             <!-- Novel View -->
             <div v-if="currentView === 'novel'" class="h-full overflow-hidden flex flex-col bg-gray-50 relative">
                 <embedded-view-content :src="novelUrl" :loading="isNovelLoading"
-                    loading-text="加载墨韵·造梦中..." @menu="toggleMobileMenu" @load="onNovelLoad">
+                    loading-text="加载小说生成中..." @menu="toggleMobileMenu" @load="onNovelLoad">
                 </embedded-view-content>
             </div>
 
@@ -2864,7 +2866,6 @@
         document.write('<script src="assets/js/core-utils.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/data-services.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/runtime-services.js?v=' + new Date().getTime() + '"><\/script>');
-        document.write('<script src="assets/js/presence.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/ui-components.js?v=' + new Date().getTime() + '"><\/script>');
         document.write('<script src="assets/js/app.js?v=' + new Date().getTime() + '"><\/script>');
     </script>

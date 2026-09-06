@@ -1793,7 +1793,7 @@ const app = createApp({
                     const legacySize = String(settings.imageSize || '');
                     settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
                 }
-                settings.imageGenCount = Math.min(8, Math.max(1, Math.round(Number(settings.imageGenCount) || 2)));
+                settings.imageGenCount = Math.min(8, Math.max(2, Math.round(Number(settings.imageGenCount) || 2)));
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -2133,6 +2133,7 @@ const app = createApp({
             if (!button) return;
             event.preventDefault();
             event.stopPropagation();
+
             const card = button.closest('.generated-image-card');
             if (card.classList.contains('is-rerolling')) return;
             const cards = [...event.currentTarget.querySelectorAll('.generated-image-card')];
@@ -2443,6 +2444,9 @@ const app = createApp({
             .sort((a, b) => (Number(b.template.order) || 0) - (Number(a.template.order) || 0) || a.index - b.index)
             .map(item => item.template));
         const activeUiTemplates = computed(() => currentUiTemplates.value.filter(t => t.enabled !== false));
+        const isUiTemplateAnalysisEnabled = () => settings.uiTemplateEnabled
+            && settings.uiTemplateMainModelAnalysis
+            && activeUiTemplates.value.length > 0;
 
         const handleUiTemplateClick = (event) => {
             const trigger = event.target?.closest?.('[data-slash]');
@@ -3308,8 +3312,7 @@ const app = createApp({
                     // 如果正则本身就在匹配代码块（如用户提供的 ```json ...```），则不应进行保护
                     // 增强保护：防止普通正则（通常带g）破坏 iframe 渲染内容（HTML文档、Script/Style块）
                     if (!/[<>]/.test(regexPattern) && !regexPattern.includes('```')) {
-                        // 匹配 完整的 HTML 文档, Script/Style 块, Markdown 代码块, 行内代码, HTML 标签, 或 <cot> 块
-                        // Updated to support <think> and erroneous <cot>...<cot> closing
+                        // 匹配完整的 HTML、脚本、代码块、标签以及 thinking/COT 块
                         result = cardUtils.transformUnprotectedText(
                             result,
                             part => part.replace(re, replacement)
@@ -3648,6 +3651,7 @@ const app = createApp({
                 recordApiUsage(result.usage, {
                     type: 'image_recognition',
                     model: settings.visionModel,
+                    isStream: false,
                     durationMs: Date.now() - requestStartedAt,
                     outputCharacters: description.length
                 });
@@ -3843,7 +3847,7 @@ const app = createApp({
                 const messageEl = chatContainer.value?.querySelector(`[data-chat-index="${index}"] .message-content-wrapper`);
                 const messageHeight = messageEl?.getBoundingClientRect?.().height || 0;
                 msg.isEditing_Message = true;
-                const cotMatch = msg.content.match(/<(think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
+                const cotMatch = msg.content.match(/<(thinking|think|cot)>[\s\S]*?(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/i);
                 const uiTemplateUpdateMatch = findUiTemplateUpdateBlock(msg.content);
                 msg.originalCot = cotMatch ? cotMatch[0] : '';
                 msg.originalSys = parseCot(msg.content).sys;
@@ -4077,6 +4081,7 @@ const app = createApp({
                         recordApiUsage(getApiUsagePayload(data), {
                             type: 'ui_template',
                             model,
+                            isStream: false,
                             durationMs: Date.now() - requestStartedAt,
                             outputCharacters: content.length
                         });
@@ -4437,7 +4442,17 @@ const app = createApp({
                 defaultResultCount: ACTIVE_TOOL_DEFAULT_RESULT_COUNT
             });
         };
-        const usesThinkingCotTag = (model) => /(?:deepseek|glm)/i.test(String(model || ''));
+        const usesThinkingCotTag = (model) => /(?:deepseek|glm|kimi)/i.test(String(model || ''));
+        const getMessageThinkingText = (message, includeNativeReasoning = true) => {
+            const parts = includeNativeReasoning ? [String(message?.reasoning || '').trim()] : [];
+            const content = String(message?.content || '');
+            const thinkingPattern = /<(thinking|think|cot)>([\s\S]*?)(?:<\/\s*\1\s*>|<\s*\1\s*>|$)/gi;
+            for (const match of content.matchAll(thinkingPattern)) parts.push(String(match[2] || '').trim());
+            return [...new Set(parts)].filter(Boolean).join('\n\n');
+        };
+        const wrapAnalysis = (tag, text) => text
+            ? `<${tag}>\n${text}\n</${tag}>\n`
+            : '';
         const appendNextResponsePrompt = (messageList, { cotEnabled = false, useThinkingTag = false, writingStylePrompt = '' } = {}) => {
             const target = [...messageList].reverse().find(message => (
                 message?.role === 'user'
@@ -4450,11 +4465,10 @@ const app = createApp({
                 autoImageGenEnabled: isAutoImageGenEnabled.value,
                 cotEnabled,
                 imageGenCount: settings.imageGenCount,
+                memoryEnabled: memorySettings.enabled,
                 useThinkingTag,
                 writingStylePrompt,
-                uiTemplateEnabled: settings.uiTemplateEnabled
-                    && settings.uiTemplateMainModelAnalysis
-                    && activeUiTemplates.value.length > 0
+                uiTemplateEnabled: isUiTemplateAnalysisEnabled()
             });
             target.content = `${String(target.content || '').trimEnd()}\n\n${prompt}`;
         };
@@ -4487,7 +4501,7 @@ const app = createApp({
             if (native && typeof native.requestWakeLock === 'function') {
                 try { native.requestWakeLock(); } catch (e) { /* ignore */ }
             }
-            // 工具续写时内容会回填到旧气泡里，这里先占住"已在接收"的状态，
+            // 工具续写时内容会回填到旧气泡里，这里先占住“已在接收”的状态，
             // 避免底部全局 typing 占位气泡冒出来。
             isReceiving.value = !!continuationTargetMessage;
             isThinking.value = false;
@@ -4633,16 +4647,40 @@ const app = createApp({
                 chatHistory.value[0].role === 'assistant' &&
                 chatHistory.value[0].content === currentCharacter.value.first_mes;
 
+            const useThinkingTag = usesThinkingCotTag(requestModel);
+            const retainedThinkingTag = useThinkingTag ? 'thinking' : 'cot';
+            const openingText = String(currentCharacter.value.first_mes || '').trim();
+            const openingSourceMessage = openingText
+                ? chatHistory.value.find(source => source?.role === 'assistant'
+                    && parseCot(source.content || '').main.trim() === openingText)
+                : null;
+            const openingThinking = cotPresets.length > 0
+                ? wrapAnalysis(retainedThinkingTag, BUILTIN_PROMPTS.buildOpeningAnalysisContent({
+                    memoryEnabled: memorySettings.enabled,
+                    uiTemplateEnabled: isUiTemplateAnalysisEnabled(),
+                    characterName: currentCharacter.value.name
+                }))
+                : '';
+
             // 如果当前历史记录的第一条是“总结”消息，则认为开场白已被总结包含，不再强制补录开场白
             if (!hasFirstMesInHistory && currentCharacter.value.first_mes) {
                 messages.push({
                     role: 'assistant',
                     name: currentCharacter.value.name,
-                    content: currentCharacter.value.first_mes
+                    content: `${openingThinking}${currentCharacter.value.first_mes}`
                 });
             }
 
             // 记忆压缩：一次总结替换旧 AI 消息；二次总结把对应五轮合成一条。
+            const recentThinkingByMessage = new Map();
+            if (cotPresets.length > 0) {
+                for (let index = chatHistory.value.length - 1; index >= 0 && recentThinkingByMessage.size < 2; index--) {
+                    const source = chatHistory.value[index];
+                    if (source?.role !== 'assistant' || source === openingSourceMessage) continue;
+                    const thinking = getMessageThinkingText(source, useThinkingTag);
+                    if (thinking) recentThinkingByMessage.set(source, thinking);
+                }
+            }
             let chatHistoryForContext = postprocessedChatHistory.map((message, index) => ({
                 ...message,
                 _contextFloor: index + 1
@@ -4776,9 +4814,12 @@ const app = createApp({
                         ? sourceIndexes.map(sourceIndex => chatHistory.value[sourceIndex]).filter(source => source && source.role === m.role)
                         : [m];
                     const cleanSourceContent = (source) => {
-                        // Remove CoT content from history messages before sending to AI.
+                        // Remove internal thinking/COT from history before sending, then restore only the retained recent blocks.
                         const parsedData = parseCot(source.content || '');
                         let content = stripDisabledImageGenContext(stripNextResponsePrompt(stripUiTemplateContextInjection(parsedData.main)));
+                        const recentThinking = source.role === 'assistant' ? recentThinkingByMessage.get(source) : '';
+                        if (recentThinking) content = `${wrapAnalysis(retainedThinkingTag, recentThinking)}${content}`;
+                        if (source === openingSourceMessage && openingThinking) content = `${openingThinking}${content}`;
                         if (source.role === 'user') content = appendMessageImageDescriptions(source, content);
                         if (settings.uiTemplateEnabled
                             && settings.uiTemplateMainModelAnalysis
@@ -4939,13 +4980,37 @@ const app = createApp({
                 if (isContinuation) activeToolContinuationHasResponse.value = true;
             };
 
+            const nativeReasoningClosedMessages = new WeakSet();
+            const normalizeNativeReasoningBoundary = (message) => {
+                if (!message) return;
+                if (nativeReasoningClosedMessages.has(message)) return;
+                const reasoning = String(message.reasoning || '');
+                const closeMatch = reasoning.match(/<\/\s*(thinking|think|cot)\s*>/i);
+                if (!closeMatch) return;
+
+                const before = reasoning.slice(0, closeMatch.index)
+                    .replace(/<\s*(thinking|think|cot)\s*>/gi, '')
+                    .trim();
+                const after = reasoning.slice(closeMatch.index + closeMatch[0].length).trim();
+                message.reasoning = before;
+                if (after) {
+                    message.content = [String(message.content || '').trimEnd(), after]
+                        .filter(Boolean)
+                        .join('\n\n');
+                }
+                nativeReasoningClosedMessages.add(message);
+                isThinking.value = false;
+                collapseNativeReasoning(message);
+            };
+
             const appendAssistantReasoning = (message, text) => {
                 if (!message || !text) return;
-                if (continuationToolCall && continuingAssistantMessage && message.id === continuingAssistantMessage.id) {
-                    appendAssistantText(message, 'reasoning', text);
+                if (nativeReasoningClosedMessages.has(message)) {
+                    appendAssistantText(message, 'content', text);
                     return;
                 }
                 appendAssistantText(message, 'reasoning', text);
+                normalizeNativeReasoningBoundary(message);
             };
 
             const createAssistantMessage = (content = '', reasoning = '') => reactive({
@@ -4965,6 +5030,7 @@ const app = createApp({
                 if (assistantMessage) return assistantMessage;
                 if (continuingAssistantMessage) {
                     assistantMessage = prepareAssistantMessageForAppend(continuingAssistantMessage);
+                    normalizeNativeReasoningBoundary(assistantMessage);
                     if (reasoning) appendAssistantReasoning(assistantMessage, reasoning);
                     if (content) appendAssistantText(assistantMessage, 'content', content);
                     isReceiving.value = true;
@@ -4972,6 +5038,7 @@ const app = createApp({
                 }
 
                 assistantMessage = createAssistantMessage(content, reasoning);
+                normalizeNativeReasoningBoundary(assistantMessage);
                 promoteActiveToolCallsFromAssistant(assistantMessage);
                 chatHistory.value.push(assistantMessage);
                 isReceiving.value = true;
@@ -4995,10 +5062,12 @@ const app = createApp({
                         let seededContent = false;
                         let seededReasoning = false;
                         if (!assistantMessage) {
-                            if (reasoning) isThinking.value = true;
                             assistantMessage = ensureAssistantMessage(content, reasoning);
                             seededContent = !!content;
                             seededReasoning = !!reasoning;
+                            if (seededReasoning) {
+                                isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
+                            }
                             if (seededContent && !reasoning) {
                                 isThinking.value = false;
                                 collapseNativeReasoning(assistantMessage);
@@ -5007,7 +5076,7 @@ const app = createApp({
                         }
                         if (reasoning && !seededReasoning) {
                             appendAssistantReasoning(assistantMessage, reasoning);
-                            isThinking.value = true;
+                            isThinking.value = !nativeReasoningClosedMessages.has(assistantMessage);
                         }
                         if (content && !seededContent) {
                             appendAssistantText(assistantMessage, 'content', content);
@@ -5023,10 +5092,14 @@ const app = createApp({
                     isThinking.value = !!(reasoning && !content);
                     if (content || reasoning) {
                         assistantMessage = ensureAssistantMessage(content, reasoning);
+                        const hasReasoning = !!String(assistantMessage.reasoning || '').trim();
+                        const hasContent = !!String(assistantMessage.content || '').trim();
+                        isThinking.value = hasReasoning && !hasContent;
+                        const hasReasoningAndContent = hasReasoning && hasContent;
                         if (!continuingAssistantMessage) {
-                            assistantMessage.isReasoningOpen = !(reasoning && content);
-                            assistantMessage.isReasoningAutoCollapsed = !!(reasoning && content);
-                        } else if (reasoning && content) {
+                            assistantMessage.isReasoningOpen = !hasReasoningAndContent;
+                            assistantMessage.isReasoningAutoCollapsed = hasReasoningAndContent;
+                        } else if (hasReasoningAndContent) {
                             collapseNativeReasoning(assistantMessage);
                         }
                     }
@@ -5040,6 +5113,7 @@ const app = createApp({
                 recordApiUsage(responseUsage, {
                     type: activeToolDepth > 0 ? 'tool_continuation' : 'chat',
                     model: requestModel,
+                    isStream: responseResult.isStream,
                     durationMs: duration,
                     outputCharacters
                 });
@@ -5376,6 +5450,7 @@ const app = createApp({
             recordApiUsage(extractApiUsageFromText(rawText), {
                 type: 'summary',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: summary.length
             });
@@ -5799,6 +5874,7 @@ const app = createApp({
             recordApiUsage(getApiUsagePayload(data), {
                 type: 'embedding',
                 model,
+                isStream: false,
                 durationMs: Date.now() - requestStartedAt,
                 outputCharacters: 0
             });
@@ -8072,7 +8148,7 @@ const app = createApp({
             const imageGenRegexContent = {
                 name: imageGenRegexName,
                 regex: '/image###([^\\r\\n]*?)(?:###|(?=\\r?\\n)|$)/g',
-            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button><button type="button" class="generated-image-save" title="保存图片" aria-label="保存图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></button></div>`,
+            replacement: `<div class="generated-image-card is-generating" data-image-request="${imageRequestUrl}" style="width:100%;height:auto;max-width:100%;box-sizing:border-box;padding:2px;border:1px solid rgba(255,255,255,.58);background:transparent;position:relative;border-radius:12px;overflow:hidden;display:flex;justify-content:center;align-items:center;box-shadow:0 4px 14px rgba(148,163,184,.06)"><img alt="" style="max-width:100%;height:100%;width:100%;display:block;object-fit:contain;border-radius:9px;transition:transform .3s ease"><div class="generated-image-progress" aria-live="polite"><svg class="generated-image-spinner" viewBox="0 0 50 50" aria-hidden="true"><circle class="generated-image-spinner-path" cx="25" cy="25" r="20" fill="none" stroke-width="2"></circle></svg><span class="generated-image-progress-label">等待生成</span><span class="generated-image-progress-track"><i class="generated-image-progress-bar"></i></span></div><button type="button" class="generated-image-reroll" title="重新生成图片" aria-label="重新生成图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg></button><button type="button" class="generated-image-save" title="保存图片" aria-label="保存图片"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5 5-5M12 4v12"></path></svg></button></div>`,
                 placement: [2],
                 markdownOnly: true,
                 promptOnly: false,
@@ -8093,7 +8169,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(8, Math.max(1, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(8, Math.max(2, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -9257,6 +9333,9 @@ const app = createApp({
             // 1.7.2 Enforce Default Preset (人格内核)
             syncBuiltinPreset(BUILTIN_PRESETS.personalityCore);
 
+            // 1.7.3 Enforce Default Preset (去User中心化)
+            syncBuiltinPreset(BUILTIN_PRESETS.deUserCentric);
+
             // 1.7.5 Enforce Default Preset (文风（抗八股）)
             syncBuiltinPreset(BUILTIN_PRESETS.writingStyle);
 
@@ -9286,10 +9365,8 @@ const app = createApp({
             // 1.10 Enforce Default Preset (COT)
             const cotPresetName = 'COT';
             const syncCotPresetContent = () => {
-                const uiTemplateAnalysisEnabled = settings.uiTemplateEnabled
-                    && settings.uiTemplateMainModelAnalysis
-                    && activeUiTemplates.value.length > 0;
                 const useThinkingOpening = usesThinkingCotTag(settings.model);
+                const uiTemplateAnalysisEnabled = isUiTemplateAnalysisEnabled();
                 const cotPresetContent = buildCotPresetContent({
                     memoryEnabled: memorySettings.enabled,
                     uiTemplateAnalysisEnabled,

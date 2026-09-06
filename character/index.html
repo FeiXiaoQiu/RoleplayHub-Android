@@ -1309,7 +1309,6 @@
                         <div class="flex gap-3 items-end">
                             <!-- Textarea -->
                             <textarea ref="promptInput" v-model="prompt" @input="autoResize"
-                                @keydown.enter.exact.prevent="generateCharacter"
                                 class="textarea textarea-bordered flex-1 h-14 md:h-16 min-h-[3.5rem] md:min-h-[4rem] max-h-[40vh] resize-none py-3 leading-relaxed bg-base-200/50 focus:bg-base-100 focus:border-primary transition-all rounded-2xl scrollbar-hide shadow-sm hover:shadow-md focus:shadow-lg text-sm md:text-base"
                                 placeholder="描述你想创建的角色..."></textarea>
 
