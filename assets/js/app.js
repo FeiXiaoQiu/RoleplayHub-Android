@@ -3808,8 +3808,12 @@ const app = createApp({
 
         const toggleChatFullscreen = async () => {
             try {
+                const native = window.RoleplayHubNative;
                 if (getNativeFullscreenElement()) {
                     isChatFullscreen.value = false;
+                    if (native && typeof native.setFullscreen === 'function') {
+                        try { native.setFullscreen(false); } catch (e) { /* ignore */ }
+                    }
                     await exitNativeFullscreen();
                     return;
                 }
@@ -3820,6 +3824,9 @@ const app = createApp({
                 }
                 closeMobileMenu();
                 isChatFullscreen.value = true;
+                if (native && typeof native.setFullscreen === 'function') {
+                    try { native.setFullscreen(true); } catch (e) { /* ignore */ }
+                }
                 await requestNativeFullscreen(fullscreenTarget);
             } catch (err) {
                 isChatFullscreen.value = !!getNativeFullscreenElement();

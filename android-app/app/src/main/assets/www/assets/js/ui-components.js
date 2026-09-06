@@ -323,7 +323,6 @@
         },
         emits: ['update:current-view', 'update:collapsed', 'toggle-online', 'toggle-advanced', 'close-mobile'],
         setup(props, { emit }) {
-            window.RPHubUpdateCheck.useUpdateCheck();
             const selectView = (view) => {
                 emit('update:current-view', view);
                 emit('close-mobile');
