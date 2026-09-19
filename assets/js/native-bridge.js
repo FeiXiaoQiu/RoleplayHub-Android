@@ -248,27 +248,11 @@
         return 'ok';
     };
 
-    // --- Back button: let the page close overlays before the shell exits ---
-    const handleBack = () => {
-        try {
-            const fullscreenElement = document.fullscreenElement
-                || document.webkitFullscreenElement
-                || document.msFullscreenElement;
-            if (fullscreenElement) {
-                if (document.exitFullscreen) document.exitFullscreen();
-                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-                else if (document.msExitFullscreen) document.msExitFullscreen();
-                return true;
-            }
-        } catch (_) { /* ignore */ }
-        return false;
-    };
-
     window.RPHubPlainBackup = Object.freeze({
         exportAll: (stripImages) => { exportAll(stripImages === true || stripImages === 'true'); },
         importBegin,
         importFileChunk,
         importFinish
     });
-    window.RPHubBack = handleBack;
+    // app.js owns RPHubBack; an uninitialized page must not signal root/exit.
 })();

@@ -194,11 +194,38 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (handlingBack) return
                 handlingBack = true
-                webView.evaluateJavascript("window.RPHubBack ? window.RPHubBack() : false") { result ->
+                // Promise results are not awaited by evaluateJavascript. Only explicit false permits exit.
+                webView.evaluateJavascript("""
+                    (() => {
+                        try {
+                            if (typeof window.RPHubBack !== 'function') return 'unavailable';
+                            const result = window.RPHubBack();
+                            if (result && typeof result.then === 'function') {
+                                Promise.resolve(result).catch(error => console.error('Back failed', error));
+                                return 'pending';
+                            }
+                            return result === false ? 'root' : 'handled';
+                        } catch (error) {
+                            console.error('Back failed', error);
+                            return 'error';
+                        }
+                    })()
+                """.trimIndent()) { result ->
                     handlingBack = false
-                    if (result != "true") {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
+                    if (isFinishing || isDestroyed) return@evaluateJavascript
+                    if (result == "\"root\"") {
+                        if (webView.canGoBack()) {
+                            webView.goBack()
+                        } else {
+                            isEnabled = false
+                            try {
+                                onBackPressedDispatcher.onBackPressed()
+                            } finally {
+                                isEnabled = true
+                            }
+                        }
+                    } else if (result != "\"handled\"" && result != "\"pending\"") {
+                        Toast.makeText(this@MainActivity, "页面尚未就绪，请稍后再试", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -371,7 +398,7 @@ class MainActivity : AppCompatActivity() {
         popup.setOnMenuItemClickListener { item: MenuItem ->
             when (item.itemId) {
                 2 -> {
-                    showExportSubMenu()
+                    startPlainBackupExport(stripImages = false)
                     true
                 }
                 3 -> {
@@ -394,16 +421,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         popup.show()
-    }
-
-    private fun showExportSubMenu() {
-        AlertDialog.Builder(this)
-            .setTitle("导出数据备份")
-            .setItems(arrayOf("导出完整数据", "导出精简版（聊天记录不含图片）")) { _, which ->
-                startPlainBackupExport(stripImages = which == 1)
-            }
-            .setNegativeButton("取消", null)
-            .show()
     }
 
     private fun startPlainBackupExport(stripImages: Boolean) {

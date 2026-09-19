@@ -3944,6 +3944,25 @@ JSON 字段（世界书/正则脚本）必须输出为合法的 JSON 数组，**
                 const exportWorldInfo = () => openSelectiveExport('world');
                 const exportRegex = () => openSelectiveExport('regex');
 
+                window.RPHubBack = () => {
+                    if (confirmModal.show) {
+                        confirmModal.show = false;
+                        confirmModal.action = null;
+                        return true;
+                    }
+                    if (exportPicker.show) {
+                        exportPicker.show = false;
+                        return true;
+                    }
+                    for (const overlay of [showPreview, showDiffConfirmation, showDiffInputModal, showCardExport, showSettings, isSidebarOpen]) {
+                        if (overlay.value) {
+                            overlay.value = false;
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
                 return {
                     showSettings,
                     isSidebarOpen,

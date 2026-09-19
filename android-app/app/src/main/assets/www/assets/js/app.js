@@ -7798,6 +7798,14 @@ const app = createApp({
 
         // Handle Android back button: close overlays level by level
         window.RPHubBack = () => {
+            if (globalConfirmModal.value.show) {
+                globalConfirmModal.value.onCancel();
+                return true;
+            }
+            if (showConfirmModal.value) {
+                handleCancel();
+                return true;
+            }
             const overlays = [
                 showStoryBranchNameEditor,
                 showStoryBranchModal,
@@ -7814,10 +7822,11 @@ const app = createApp({
                 showAutoImageGenModal,
                 showUserSetupModal,
                 showNoMemoryNeededModal,
-                showConfirmModal,
                 showAddCharacterMenu,
                 showApiProviderSelector,
                 showChatModelSelector,
+                showProfileDropdown,
+                showTokenUsageTimeFilter,
                 showDescriptionPanel,
                 isNavigationOpen
             ];
@@ -7826,6 +7835,30 @@ const app = createApp({
                     overlay.value = false;
                     return true;
                 }
+            }
+            if (settingsHelpTopic.value) {
+                settingsHelpTopic.value = '';
+                return true;
+            }
+            // Only our same-origin tools expose this synchronous contract.
+            const toolPath = { generator: 'character/index.html', novel: 'novel/index.html' }[currentView.value];
+            if (toolPath) {
+                const frame = document.querySelector(`iframe[src*="${toolPath}"]`);
+                try {
+                    if (frame?.contentWindow?.RPHubBack?.() === true) return true;
+                } catch (error) {
+                    console.warn('Embedded back unavailable:', error);
+                }
+            }
+            if (getNativeFullscreenElement() || isChatFullscreen.value) {
+                isChatFullscreen.value = false;
+                window.RoleplayHubNative?.setFullscreen?.(false);
+                Promise.resolve(exitNativeFullscreen()).catch(error => console.error('Exit fullscreen failed:', error));
+                return true;
+            }
+            if (currentView.value !== 'chat') {
+                currentView.value = 'chat';
+                return true;
             }
             return false;
         };

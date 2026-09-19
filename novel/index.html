@@ -2863,6 +2863,20 @@ ${charPrompt}
                     nextTick(() => updateTabSlider());
                 });
 
+                window.RPHubBack = () => {
+                    if (showConfirmModal.value) {
+                        cancelConfirm();
+                        return true;
+                    }
+                    for (const overlay of [showApiProviderSelect, showWordCountSelect, showGenerateCountSelect, showReviewModal, showImportExportModal, showSettings, mobileSidebarOpen]) {
+                        if (overlay.value) {
+                            overlay.value = false;
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
                 onUnmounted(() => {
                     window.removeEventListener('resize', handleResize);
                 });
@@ -2893,6 +2907,5 @@ ${charPrompt}
     </script>
 </body>
 </html>
-
 
 
