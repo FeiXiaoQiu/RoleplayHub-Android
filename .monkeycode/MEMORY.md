@@ -31,6 +31,13 @@ Entries discovered by the Agent during task execution should follow this format:
 
 ## Entries
 
+[凭据保护要求]
+- Date: 2026-09-19
+- Context: 用户要求保护提供的 GitHub 凭据，避免上传仓库
+- Instructions:
+  - 凭据通过平台安全凭据管理入口配置；源码、文档、记忆文件和 Git 提交中禁止保存令牌值，回复与日志中避免回显。
+  - 记忆仅保留凭据处理规则，已在聊天中公开的令牌应撤销并更换。
+
 [提交确认偏好]
 - Date: 2026-09-19
 - Context: 用户要求合并后直接提交、推送并发布，下次无需询问
