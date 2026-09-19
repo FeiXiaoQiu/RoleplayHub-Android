@@ -616,6 +616,7 @@ const app = createApp({
             immersiveMode: false,
             showLatestUsageBar: false,
             styleFilterEnabled: true,
+            enterKeyNewline: true,
             uiTemplateEnabled: false,
             uiTemplateModel: '',
             uiTemplateAnalysisDepth: 4,
@@ -1793,7 +1794,7 @@ const app = createApp({
                     const legacySize = String(settings.imageSize || '');
                     settings.imageSize = legacySize.includes('横') ? '横图' : legacySize.includes('方') ? '方图' : '竖图';
                 }
-                settings.imageGenCount = Math.min(8, Math.max(2, Math.round(Number(settings.imageGenCount) || 2)));
+                settings.imageGenCount = Math.min(8, Math.max(1, Math.round(Number(settings.imageGenCount) || 2)));
                 settings.fontFamilyVersion = 4;
                 applyFontFamily(settings.fontFamily);
                 delete settings.renderLayerLimit;
@@ -3713,6 +3714,13 @@ const app = createApp({
             } finally {
                 if (!slotsTransferred) pendingChatImageReadCount.value -= files.length;
             }
+        };
+
+        const handleChatInputKeydown = (e) => {
+            if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+            if (settings.enterKeyNewline || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            sendMessage();
         };
 
         const sendMessage = async () => {
@@ -8176,7 +8184,7 @@ const app = createApp({
 
             // 2. 自动生图世界书
             const autoImageGenWIName = '自动生图';
-            const imageGenCount = Math.min(8, Math.max(2, Number(settings.imageGenCount) || 2));
+            const imageGenCount = Math.min(8, Math.max(1, Number(settings.imageGenCount) || 2));
             const autoImageGenWIContent = {
                 comment: autoImageGenWIName,
                 keys: [],
@@ -9914,7 +9922,7 @@ const app = createApp({
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
             toggleMobileMenu, closeMobileMenu,
-            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, stopGeneration, clearChat, toggleChatFullscreen,
+            fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, handleChatInputKeydown, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
             editMessage, saveEditMessage, cancelEditMessage,

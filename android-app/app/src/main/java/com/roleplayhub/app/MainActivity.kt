@@ -55,14 +55,17 @@ class MainActivity : AppCompatActivity() {
     private var handlingBack = false
     private var pendingImageSaveUrl: String? = null
     private var pendingDownload: PendingDownload? = null
-    private var savedStatusBarColor = 0
-    private var savedNavigationBarColor = 0
+    private var baselineStatusBarColor = 0
+    private var baselineNavigationBarColor = 0
     private var isFullscreen = false
     private var pendingSaveFile: PendingSaveFile? = null
     private var pendingBackupStripImages: Boolean? = null
     private val plainBackupReceiver = PlainBackupReceiver()
     private var pendingPlainBackupFiles: List<PlainBackupManager.PlainFile>? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var rootLayout: FrameLayout
+    private var customView: View? = null
+    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
     private val imageSavePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val url = pendingImageSaveUrl
@@ -173,14 +176,22 @@ class MainActivity : AppCompatActivity() {
         menuBtn = btn
 
         val root = FrameLayout(this)
+        rootLayout = root
         root.addView(webView, FrameLayout.LayoutParams(-1, -1))
         root.addView(btn)
         setContentView(root)
         window.setBackgroundDrawable(ColorDrawable(Color.parseColor("#f9fafb")))
+        baselineStatusBarColor = ContextCompat.getColor(this, R.color.status_bar)
+        baselineNavigationBarColor = window.navigationBarColor
+        window.statusBarColor = baselineStatusBarColor
         setupDraggableButton(btn, root)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (customView != null) {
+                    hideCustomView()
+                    return
+                }
                 if (handlingBack) return
                 handlingBack = true
                 webView.evaluateJavascript("window.RPHubBack ? window.RPHubBack() : false") { result ->
@@ -228,7 +239,42 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                if (customView != null) {
+                    callback.onCustomViewHidden()
+                    return
+                }
+                customView = view
+                customViewCallback = callback
+                webView.visibility = View.INVISIBLE
+                menuBtn.visibility = View.INVISIBLE
+                rootLayout.addView(
+                    view,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                )
+                updateSystemBars()
+            }
+
+            override fun onHideCustomView() {
+                hideCustomView()
+            }
         }
+    }
+
+    private fun hideCustomView() {
+        val view = customView ?: return
+        rootLayout.removeView(view)
+        customView = null
+        val callback = customViewCallback
+        customViewCallback = null
+        webView.visibility = View.VISIBLE
+        menuBtn.visibility = View.VISIBLE
+        callback?.onCustomViewHidden()
+        updateSystemBars()
     }
 
     fun setFullscreen(enabled: Boolean) {
@@ -236,21 +282,23 @@ class MainActivity : AppCompatActivity() {
             isFullscreen = enabled
             val w = window
             webView.setBackgroundColor(Color.parseColor("#f9fafb"))
-            if (enabled) {
-                savedStatusBarColor = w.statusBarColor
-                savedNavigationBarColor = w.navigationBarColor
-                w.statusBarColor = 0
-                w.navigationBarColor = 0
-                applyImmersiveFlags()
-            } else {
-                w.statusBarColor = savedStatusBarColor
-                w.navigationBarColor = savedNavigationBarColor
-                w.decorView.systemUiVisibility = 0
-            }
+            updateSystemBars()
             w.decorView.postDelayed({
                 webView.requestLayout()
                 webView.evaluateJavascript("window.dispatchEvent(new Event('resize'));", null)
             }, 200)
+        }
+    }
+
+    private fun updateSystemBars() {
+        if (isFullscreen || customView != null) {
+            window.statusBarColor = Color.TRANSPARENT
+            window.navigationBarColor = Color.TRANSPARENT
+            applyImmersiveFlags()
+        } else {
+            window.statusBarColor = baselineStatusBarColor
+            window.navigationBarColor = baselineNavigationBarColor
+            window.decorView.systemUiVisibility = 0
         }
     }
 
@@ -267,8 +315,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && isFullscreen) {
-            applyImmersiveFlags()
+        if (hasFocus) {
+            updateSystemBars()
         }
     }
 

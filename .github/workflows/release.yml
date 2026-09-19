@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -38,11 +40,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ github.ref_name }}"
+          PREV_TAG="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          NOTES="$(git log "${PREV_TAG:+$PREV_TAG..}HEAD" --oneline --no-decorate)
+
+          ### 版本说明
+          本版本为 rc-11（210），可从 rc-9（208）直接升级；仓库已有 rc-10 标签。
+
+          - 页面依赖改为本地 vendor 优先加载，修复侧边栏不可用。
+          - 补全 WebView HTML5 全屏与备份导出、恢复桥接。
+          - 修复选择 1 张图片仍被强制改成 2 张的问题。
+          - 新增默认开启的输入框回车换行开关，兼容中文输入法选字。
+          - 修复退出全屏后的系统栏颜色恢复；打孔屏效果待真机验证。"
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --draft \
             --title "Roleplay Hub Android $TAG" \
-            --target "${{ github.sha }}"
+            --target "${{ github.sha }}" \
+            --notes "$NOTES"
 
       - name: Build release APK
         working-directory: android-app
