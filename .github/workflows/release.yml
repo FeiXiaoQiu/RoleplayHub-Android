@@ -55,9 +55,10 @@ jobs:
           NOTES="$(git log "${PREV_TAG:+$PREV_TAG..}HEAD" --oneline --no-decorate)
 
           ### 版本说明
-          本版本为 rc-11（210），可从 rc-9（208）直接升级；仓库已有 rc-10 标签。
+          本版本为 rc-12（211），同步 STA1N156/RP-Hub main 的 1.9.6 Preview（c52ac9a）。可从 rc-9/rc-10/rc-11 直接升级。
 
-          - 页面依赖改为本地 vendor 优先加载，修复侧边栏不可用。
+          - 三方合并上游 1.9.6 Preview，保留 Android 套壳和本地定制。
+          - 页面依赖保持本地 vendor 优先加载，保留侧边栏修复。
           - 补全 WebView HTML5 全屏与备份导出、恢复桥接。
           - 修复选择 1 张图片仍被强制改成 2 张的问题。
           - 新增默认开启的输入框回车换行开关，兼容中文输入法选字。

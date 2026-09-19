@@ -13,12 +13,14 @@
     <!-- Marked for Markdown rendering -->
     <script src="../assets/vendor/marked.min.js"></script>
     <script>window.marked || document.write('<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"><\/script>');</script>
+    <script src="../assets/js/built-in-content.js"></script>
+    <script src="../assets/js/core-utils.js"></script>
     <script src="../assets/js/api-utils.js"></script>
     <!-- Google Fonts（本地无 Noto Serif SC / Ma Shan Zheng 字体文件，加载失败时仅回退系统字体） -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
-    
+
     <style>
         :root {
             --font-main: 'Noto Serif SC', serif;
@@ -33,7 +35,7 @@
         .font-art {
             font-family: var(--font-art);
         }
-        
+
         /* 滚动条美化 */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -48,7 +50,7 @@
         .list-move {
             transition: transform 0.6s cubic-bezier(0.5, 0, 0.2, 1); /* 专门控制位移，确保平滑 */
         }
-        
+
         .list-enter-active,
         .list-leave-active {
             transition: all 0.6s cubic-bezier(0.5, 0, 0.2, 1);
@@ -128,7 +130,7 @@
         /* Markdown 样式 */
         .prose p { margin-bottom: 1.2em; text-indent: 2em; line-height: 1.8; text-align: justify; }
         .prose h1, .prose h2 { text-align: center; margin: 1.5em 0 1em; font-weight: bold; }
-        
+
         /* 书评 Markdown 样式优化 */
         .review-prose p { margin-bottom: 0.8em; text-indent: 0; line-height: 1.6; text-align: left; }
         .review-prose h3 { font-size: 1em; font-weight: bold; margin-top: 1.2em; margin-bottom: 0.5em; color: #44403c; }
@@ -156,7 +158,7 @@
             stroke-linecap: round;
             fill: none;
         }
-        
+
         @keyframes write-complex {
             0% { transform: rotate(-10deg) translateY(0) scale(1); }
             15% { transform: rotate(5deg) translateY(-4px) scale(1.02); } /* 提笔 */
@@ -175,7 +177,7 @@
             opacity: 0;
             animation: ink-splash 3s infinite;
         }
-        
+
         @keyframes ink-splash {
             0%, 70% { transform: translate(50px, 90px) scale(0); opacity: 0; }
             75% { opacity: 0.6; }
@@ -186,7 +188,7 @@
         /* 卡片悬浮特效 */
         .hover-card { transition: all 0.2s ease; }
         .hover-card:hover { transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-        
+
         /* 通用图标样式 */
         .icon { width: 1.2em; height: 1.2em; fill: currentColor; display: inline-block; vertical-align: middle; }
 
@@ -202,7 +204,7 @@
 </head>
 <body class="h-screen flex flex-col md:flex-row overflow-hidden selection:bg-stone-300 selection:text-stone-900">
     <div id="app" class="w-full h-full flex relative">
-        
+
         <!-- Toast 提示 -->
         <transition name="toast">
             <div v-if="toast.show" class="fixed top-5 left-1/2 -translate-x-1/2 bg-white text-stone-700 px-8 py-4 rounded-full shadow-2xl border border-stone-200/80 z-[100] flex items-center gap-4 w-auto max-w-[90vw]">
@@ -228,7 +230,7 @@
         <!-- 侧边栏 (响应式) -->
         <aside class="fixed md:static inset-y-0 left-0 w-5/6 md:w-96 bg-[#e8e8e3] border-r border-[#d4d4ce] flex flex-col shadow-2xl z-50 transform transition-transform duration-300 md:transform-none rounded-r-3xl md:rounded-none overflow-hidden"
                :class="{'translate-x-0': mobileSidebarOpen, '-translate-x-full': !mobileSidebarOpen && isMobile}">
-            
+
             <!-- 侧边栏头部 (仅桌面端显示) -->
             <div class="hidden md:flex p-5 border-b border-[#d4d4ce] justify-between items-center bg-[#e0e0db] shrink-0">
                 <h1 class="text-2xl font-art text-stone-800 select-none">小说生成</h1>
@@ -266,7 +268,7 @@
 
             <!-- 侧边栏内容区 -->
             <div class="flex-1 overflow-hidden relative">
-                
+
                 <!-- 书架 Tab -->
                 <transition name="tab">
                     <div v-if="currentTab === 'bookshelf'" class="absolute inset-0 overflow-hidden flex flex-col h-full">
@@ -276,7 +278,7 @@
                                      @click="switchBook(book.id)"
                                      class="relative rounded-2xl p-5 transition-all duration-300 cursor-pointer group overflow-hidden border flex flex-col gap-3 min-h-[140px]"
                                      :class="currentBookId === book.id ? 'bg-white border-transparent shadow-xl scale-[1.02] z-10' : 'bg-[#f5f5f0] border-[#d4d4ce] hover:border-stone-400 hover:shadow-lg hover:bg-white/60'">
-                                    
+
                                     <div class="flex justify-between items-start pl-2">
                                         <div class="flex items-center gap-3 flex-1 overflow-hidden">
                                             <!-- 封面/图标 -->
@@ -284,7 +286,7 @@
                                                  :class="currentBookId === book.id ? 'bg-stone-800' : 'bg-stone-400 group-hover:bg-stone-500'">
                                                 {{ (book.title || '无')[0] }}
                                             </div>
-                                            
+
                                             <div class="flex flex-col overflow-hidden gap-0.5">
                                                 <span class="font-bold truncate text-lg transition-colors"
                                                       :class="currentBookId === book.id ? 'text-stone-900' : 'text-stone-600 group-hover:text-stone-800'">
@@ -304,7 +306,7 @@
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <!-- 简介 -->
                                     <div class="text-xs line-clamp-4 leading-relaxed pl-2 transition-colors flex-1 mb-2"
                                          :class="currentBookId === book.id ? 'text-stone-600' : 'text-stone-400 group-hover:text-stone-500'">
@@ -344,10 +346,10 @@
                                 <svg class="icon w-4 h-4" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
                                 书名
                             </label>
-                            <input v-model="novel.title" @change="saveData" placeholder="无题" 
+                            <input v-model="novel.title" @change="saveData" placeholder="无题"
                                    class="w-full bg-[#f5f5f0] border-b-2 border-[#d4d4ce] focus:border-stone-600 px-3 py-2 text-lg font-bold transition-colors outline-none placeholder-stone-300">
                         </div>
-                        
+
                         <div class="space-y-3">
                             <label class="block text-xs font-bold text-stone-500 uppercase tracking-wider flex items-center gap-2">
                                 <svg class="icon w-4 h-4" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
@@ -395,27 +397,27 @@
                     <div v-if="currentTab === 'characters'" class="absolute inset-0 overflow-y-auto p-4 flex flex-col h-full">
                         <div class="flex-1 overflow-y-auto space-y-3 pb-4">
                             <transition-group name="list">
-                                <div v-for="(char, index) in structuredCharacters" :key="char.id" 
+                                <div v-for="(char, index) in structuredCharacters" :key="char.id"
                                      class="bg-[#f5f5f0] border border-[#d4d4ce] rounded-lg p-3 hover:border-stone-400 transition-all group relative hover-card">
-                                    
+
                                     <div class="flex justify-between items-start mb-2">
                                         <div class="flex items-center gap-2">
                                             <div class="w-8 h-8 rounded-full bg-stone-300 flex items-center justify-center text-stone-600 font-art text-lg shrink-0">
                                                 {{ char.name[0] || '?' }}
                                             </div>
-                                            <input v-model="char.name" @change="saveData" placeholder="角色名" 
+                                            <input v-model="char.name" @change="saveData" placeholder="角色名"
                                                    class="bg-transparent font-bold text-stone-800 w-28 focus:outline-none border-b border-transparent focus:border-stone-400">
                                         </div>
                                         <button @click="removeCharacter(index)" class="opacity-0 group-hover:opacity-100 text-stone-400 hover:text-red-500 transition-opacity p-1">
                                             <svg class="icon w-4 h-4" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                                         </button>
                                     </div>
-                                    
-                                    <textarea v-model="char.desc" @change="saveData" placeholder="性格、外貌、背景..." rows="5" 
+
+                                    <textarea v-model="char.desc" @change="saveData" placeholder="性格、外貌、背景..." rows="5"
                                               class="w-full bg-transparent text-xs text-stone-600 resize-none focus:outline-none border-b border-transparent focus:border-stone-300 py-1 leading-relaxed"></textarea>
                                 </div>
                             </transition-group>
-                            
+
                             <div v-if="structuredCharacters.length === 0" class="text-center py-10 text-stone-400 flex flex-col items-center">
                                 <svg class="icon w-12 h-12 mb-3 text-stone-300" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
                                 <p class="text-sm">暂无角色，请添加</p>
@@ -437,7 +439,7 @@
                                 <div v-for="(chapter, index) in chapters" :key="index"
                                      class="rounded-lg md:hover:bg-white md:hover:shadow-sm transition-all border border-transparent md:hover:border-stone-200"
                                      :class="{'bg-white shadow-sm border-stone-200': currentChapterIndex === index}">
-                                    
+
                                     <!-- 标题行 -->
                                     <div class="flex items-center justify-between px-4 py-3 cursor-pointer group">
                                         <!-- 左侧：序号+标题 (点击跳转) -->
@@ -445,7 +447,7 @@
                                             <span class="text-sm font-mono text-stone-400 w-6 font-bold">{{ index + 1 }}</span>
                                             <span class="truncate text-base" :class="{'font-bold': currentChapterIndex === index}">{{ chapter.title || '未命名章节' }}</span>
                                         </div>
-                                        
+
                                         <!-- 右侧：字数 + 展开箭头 -->
                                         <div class="flex items-center gap-1">
                                             <span class="text-[10px] text-stone-400 opacity-0 md:group-hover:opacity-100 transition-opacity">{{ chapter.wordCount }}字</span>
@@ -501,7 +503,7 @@
                                 <button @click="performSearch" class="bg-stone-800 text-white py-2 rounded-lg text-xs hover:bg-stone-700 transition-colors">查找全部</button>
                                 <button @click="replaceAll" :disabled="!searchResults.length" class="bg-stone-200 text-stone-800 py-2 rounded-lg text-xs hover:bg-stone-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">全部替换</button>
                             </div>
-                            
+
                             <div class="flex gap-2 border-t border-stone-200 pt-3 mt-2" v-if="searchResults.length > 0">
                                 <button @click="replaceCurrentMatch" class="flex-1 bg-stone-200 text-stone-800 py-2 rounded-lg text-xs hover:bg-stone-300 transition-colors">替换当前</button>
                                 <div class="flex gap-1">
@@ -538,7 +540,7 @@
                 </transition>
 
             </div>
-            
+
             <!-- 侧边栏底部 -->
             <div class="px-3 py-1.5 md:py-2 border-t border-[#d4d4ce] bg-[#e0e0db] shrink-0">
                 <button @click="clearAll" class="w-full py-1 px-3 text-stone-600 hover:bg-stone-300/50 rounded transition-colors text-sm flex items-center justify-center gap-1.5">
@@ -551,7 +553,7 @@
         <!-- 主内容区 -->
         <main class="flex-1 h-full overflow-y-auto relative scroll-smooth bg-[#f5f5f0] pt-14 md:pt-0" ref="mainScroll">
             <div class="max-w-4xl mx-auto px-4 md:px-12 py-8 md:py-16 min-h-full flex flex-col">
-                
+
                 <!-- 标题展示 -->
                 <div class="text-center mb-12 md:mb-20 mt-4 animate-fade-in-up">
                     <h1 class="text-3xl md:text-5xl font-art text-stone-900 mb-6">{{ novel.title || '无题' }}</h1>
@@ -584,14 +586,14 @@
                                     <svg class="icon w-4 h-4 text-stone-400 transition-transform duration-300" :class="{'rotate-180': chapter.isExpanded}" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
                                 </div>
                             </div>
-                            
+
                             <!-- 章节内容 (Grid 手风琴效果) -->
                             <div class="chapter-accordion" :class="{ 'expanded': chapter.isExpanded }" :style="{ 'max-height': chapter.isExpanded ? chapter.contentHeight + 'px' : '0px' }">
                                 <div class="chapter-accordion-content" :id="'chapter-content-' + index">
                                     <!-- 阅读模式 -->
                                     <div v-if="!chapter.isEditing" class="px-4 md:px-12 py-6 md:py-12 prose prose-stone max-w-none font-serif text-base md:text-lg text-stone-800 bg-white leading-loose">
                                         <div v-html="renderChapterContent(chapter, index)"></div>
-                                        
+
                                         <!-- 评论区 -->
                                         <div v-if="(chapter.comments && chapter.comments.length > 0) || chapter.isGeneratingComments" class="mt-12 pt-8 border-t border-stone-100">
                                             <div @click="toggleChapterComments(index)" class="flex items-center justify-between cursor-pointer group select-none mb-4">
@@ -617,7 +619,7 @@
                                                             <img v-if="comment.avatar" :src="comment.avatar" class="w-full h-full object-cover opacity-80" :alt="comment.username">
                                                             <span v-else>{{ comment.username ? comment.username[0] : '?' }}</span>
                                                         </div>
-                                                        
+
                                                         <div class="flex-1 space-y-1">
                                                             <!-- 用户名行 -->
                                                             <div class="flex items-center justify-between">
@@ -628,12 +630,12 @@
                                                                 </div>
                                                                 <span class="text-[10px] text-stone-300">{{ cIndex + 1 }}L</span>
                                                             </div>
-                                                            
+
                                                             <!-- 内容 -->
                                                             <div class="text-sm text-stone-700 leading-relaxed">
                                                                 {{ comment.content }}
                                                             </div>
-                                                            
+
                                                             <!-- 底部信息 -->
                                                             <div class="flex items-center justify-between text-[10px] text-stone-400 pt-1">
                                                                 <div class="flex items-center gap-2">
@@ -703,7 +705,7 @@
                                         <textarea v-model="chapter.tempContent" rows="20"
                                                   class="w-full p-4 bg-stone-50 border border-stone-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-stone-300 font-serif text-base md:text-lg leading-loose resize-y text-stone-800"></textarea>
                                     </div>
-                                    
+
                                     <!-- 章节操作 -->
                                     <div class="px-4 md:px-8 py-4 bg-stone-50 border-t border-stone-100 flex justify-end gap-2 md:gap-3 opacity-100 transition-opacity overflow-x-auto">
                                         <template v-if="chapter.isEditing">
@@ -760,7 +762,7 @@
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <!-- 实时流式内容 -->
                             <div v-if="streamContent" class="prose prose-stone max-w-none font-serif text-base md:text-lg text-stone-800 opacity-80 border-t border-stone-100 pt-6 md:pt-8">
                                 <div v-html="renderMarkdown(streamContent)"></div>
@@ -774,13 +776,13 @@
                     <div class="bg-white/90 backdrop-blur-md shadow-2xl border border-stone-200/50 rounded-2xl p-3 flex flex-col gap-3 max-w-2xl mx-auto transition-all duration-300 hover:shadow-3xl">
                         <!-- 输入提示词 -->
                         <div class="relative group">
-                            <textarea v-model="nextChapterPrompt" placeholder="下一章剧情走向..." rows="2" 
+                            <textarea v-model="nextChapterPrompt" placeholder="下一章剧情走向..." rows="2"
                                       class="w-full bg-stone-50/50 hover:bg-stone-50 border border-transparent hover:border-stone-200 rounded-xl px-4 py-2 md:py-3 text-stone-700 focus:outline-none focus:bg-white focus:ring-2 focus:ring-stone-200 transition-all resize-none text-sm"></textarea>
                             <div class="absolute bottom-1 right-2 text-[10px] text-stone-400 transition-opacity" :class="nextChapterPrompt ? 'opacity-100' : 'opacity-0'">
                                 {{ nextChapterPrompt.length }}
                             </div>
                         </div>
-                        
+
                         <div class="flex flex-col md:flex-row justify-between items-center gap-2 md:gap-0">
                             <div class="flex items-center gap-2 md:gap-4 w-full md:w-auto justify-between md:justify-start">
                                 <div class="flex items-center gap-1 text-xs font-bold text-stone-500">
@@ -878,7 +880,7 @@
                             </button>
                         </div>
                     </div>
-                    
+
                     <!-- 弹窗内容区：三栏布局 -->
                     <div class="flex-1 overflow-hidden flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-[#d4d4ce] bg-[#f5f5f0]">
                         <!-- 移动端 Tab 栏 (仅小屏显示) -->
@@ -1010,7 +1012,7 @@
                             <svg class="icon w-5 h-5" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </button>
                     </div>
-                    
+
                     <div class="p-6 flex-1 min-h-0 flex flex-col gap-6 overflow-hidden">
                         <!-- RP-Hub API 同步 -->
                         <div class="space-y-4">
@@ -1069,7 +1071,7 @@
                                     {{ isLoadingModels ? '获取中...' : '刷新列表' }}
                                 </button>
                             </div>
-                            
+
                             <!-- 配置目标选择器 -->
                             <div class="flex gap-2 bg-stone-100 p-1 rounded-lg">
                                 <button v-for="target in modelTargets" :key="target.id"
@@ -1083,9 +1085,9 @@
                             <div class="relative flex-1 min-h-0 flex flex-col">
                                 <svg class="icon w-4 h-4 absolute left-3 top-2.5 text-stone-400" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
                                 <input v-model="modelSearch" placeholder="搜索模型..." class="w-full pl-9 border border-stone-200 rounded px-3 py-2 text-sm mb-2 focus:ring-2 focus:ring-stone-200 focus:border-stone-400 outline-none bg-stone-50">
-                                
+
                                 <div class="flex-1 min-h-0 overflow-y-auto border border-stone-200 rounded bg-white custom-scrollbar">
-                                    <div v-for="model in filteredModels" :key="model.id" 
+                                    <div v-for="model in filteredModels" :key="model.id"
                                          @click="selectModel(model.id)"
                                          class="px-4 py-2 text-sm cursor-pointer hover:bg-stone-100 flex justify-between items-center transition-colors border-b border-stone-50 last:border-0"
                                          :class="{'bg-stone-100 font-bold text-stone-800': settings[currentModelTarget] === model.id, 'text-stone-600': settings[currentModelTarget] !== model.id}">
@@ -1104,7 +1106,7 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <div class="p-4 bg-stone-50 border-t border-stone-100 flex justify-end">
                         <button @click="showSettings = false" class="px-6 py-2 bg-stone-800 text-white rounded-lg hover:bg-stone-700 active:scale-95 transition-all text-sm shadow-lg">完成</button>
                     </div>
@@ -1204,7 +1206,7 @@
                 const isSyncingRPHub = ref(false);
                 const showApiProviderSelect = ref(false);
                 const RPHUB_PROVIDER_DEFINITIONS = [
-                    { id: 'sta1n', name: 'STA1N API', apiUrl: 'https://cdn.sta1n.cn/v1', icon: 'https://picui.ogmua.cn/s1/2026/08/21/6a87a751bf871.webp' },
+                    { id: 'sta1n', name: 'STA1N API', apiUrl: 'https://cdn.sta1n.cn/v1', icon: 'https://img.cdn1.vip/i/6a11f4d96fa99_1779561689.webp' },
                     { id: 'deepseek', name: 'DeepSeek', apiUrl: 'https://api.deepseek.com/v1', icon: 'https://www.deepseek.com/favicon.ico' },
                     { id: 'openrouter', name: 'OpenRouter', apiUrl: 'https://openrouter.ai/api/v1', icon: 'https://openrouter.ai/favicon.ico' },
                     { id: 'siliconflow', name: 'SiliconFlow', apiUrl: 'https://api.siliconflow.cn/v1', icon: 'https://siliconflow.cn/favicon.ico' }
@@ -1243,7 +1245,7 @@
                 const searchResults = ref([]);
                 const currentMatchIndex = ref(-1);
                 const hasSearched = ref(false);
-                
+
                 // 下拉菜单状态
                 const showWordCountSelect = ref(false);
                 const showGenerateCountSelect = ref(false);
@@ -1262,7 +1264,7 @@
                 // 移动端状态
                 const mobileSidebarOpen = ref(false);
                 const isMobile = ref(window.innerWidth < 768);
-                
+
                 const currentTab = ref('bookshelf'); // 'bookshelf', 'settings', 'characters', 'chapters', 'search'
                 const tabs = [
                     { id: 'bookshelf', name: '书架' },
@@ -1290,7 +1292,7 @@
 
                 // 计算属性
                 const totalWordCount = computed(() => chapters.value.reduce((acc, cur) => acc + (cur.wordCount || 0), 0));
-                
+
                 const wordCountLabel = computed(() => wordCountOptions.find(o => o.value === wordCountTarget.value)?.label);
                 const generateCountLabel = computed(() => generateCountOptions.find(o => o.value === generateCount.value)?.label);
 
@@ -1340,25 +1342,14 @@
                     }
                 };
 
-                const readSseContent = async (response, onContent) => {
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-                    let buffer = '';
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        buffer += decoder.decode(value, { stream: true });
-                        const lines = buffer.split('\n');
-                        buffer = lines.pop();
-                        lines.forEach(line => {
-                            if (!line.startsWith('data: ')) return;
-                            const dataText = line.slice(6);
-                            if (dataText === '[DONE]') return;
-                            try {
-                                onContent(JSON.parse(dataText).choices[0].delta.content || '');
-                            } catch (error) { }
-                        });
-                    }
+                const requestNovelCompletion = async (options, onContent) => {
+                    const result = await window.RPHubApiClient.requestChatCompletion({
+                        url: buildApiEndpoint(settings.value.apiUrl, 'chat/completions'),
+                        apiKey: settings.value.apiKey, ...options,
+                        onDelta: ({ content }) => onContent?.(content)
+                    });
+                    if (!result.isStream) onContent?.(result.content);
+                    return result;
                 };
 
                 // 列表交错动画钩子
@@ -1551,24 +1542,14 @@
                     // 并发调用函数
                     const callAI = async (persona) => {
                         try {
-                            const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
-                                body: JSON.stringify({
-                                    model: reviewModel,
-                                    messages: [
-                                        { role: "system", content: persona.systemPrompt },
-                                        { role: "user", content: fullContent }
-                                    ],
-                                    stream: true
-                                })
-                            });
-
-                            if (!response.ok) throw new Error(response.statusText);
-
-                            await readSseContent(response, content => {
-                                reviews.value[persona.id] += content;
-                            });
+                            await requestNovelCompletion({
+                                model: reviewModel,
+                                messages: [
+                                    { role: 'system', content: persona.systemPrompt },
+                                    { role: 'user', content: fullContent }
+                                ],
+                                stream: true
+                            }, content => { reviews.value[persona.id] += content; });
                             reviewStatus.value[persona.id] = 'done';
                         } catch (e) {
                             console.error(`${persona.name} 点评失败:`, e);
@@ -1604,7 +1585,7 @@
 
                 const renderChapterContent = (chapter, chapterIndex) => {
                     let html = marked.parse(chapter.content || '');
-                    
+
                     // 如果有搜索结果且当前章节包含匹配项
                     if (searchQuery.value && searchResults.value.length > 0) {
                         // 简单的正则替换高亮，注意这里只替换文本，不处理复杂的 HTML 标签嵌套情况
@@ -1612,7 +1593,7 @@
                         // 这是一个简化的实现
                         try {
                             const regex = new RegExp(`(${searchQuery.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-                            
+
                             // 标记当前选中的匹配项
                             let matchCountInPrevChapters = 0;
                             for(let i=0; i<chapterIndex; i++) {
@@ -1650,7 +1631,7 @@
                     showToast('章节已保存，正在更新书评...', 'success');
                     // 如果正在搜索，重新搜索以更新结果
                     if (searchQuery.value) performSearch();
-                    
+
                     // 重新生成评论
                     generateChapterComments(index);
                 };
@@ -1698,9 +1679,9 @@
                     if (!searchQuery.value) return;
                     searchResults.value = [];
                     hasSearched.value = true;
-                    
+
                     const regex = new RegExp(searchQuery.value, 'gi');
-                    
+
                     chapters.value.forEach((chapter, cIndex) => {
                         let match;
                         while ((match = regex.exec(chapter.content)) !== null) {
@@ -1708,7 +1689,7 @@
                             const start = Math.max(0, match.index - 10);
                             const end = Math.min(chapter.content.length, match.index + searchQuery.value.length + 10);
                             let context = chapter.content.substring(start, end);
-                            
+
                             // 高亮上下文中的关键词
                             context = context.replace(new RegExp(searchQuery.value, 'gi'), '<b>$&</b>');
                             if (start > 0) context = '...' + context;
@@ -1734,7 +1715,7 @@
                     if (index < 0 || index >= searchResults.value.length) return;
                     currentMatchIndex.value = index;
                     const result = searchResults.value[index];
-                    
+
                     // 展开对应章节
                     if (!chapters.value[result.chapterIndex].isExpanded) {
                         toggleChapter(result.chapterIndex);
@@ -1777,14 +1758,14 @@
                    }, () => {
                        const result = searchResults.value[currentMatchIndex.value];
                        const chapter = chapters.value[result.chapterIndex];
-                       
+
                        let matchCountInPrevChapters = 0;
                        for(let i=0; i<result.chapterIndex; i++) {
                            matchCountInPrevChapters += (chapters.value[i].content.match(new RegExp(searchQuery.value, 'gi')) || []).length;
                        }
-                       
+
                        const localMatchIndex = currentMatchIndex.value - matchCountInPrevChapters;
-                       
+
                        let count = 0;
                        const regex = new RegExp(searchQuery.value, 'gi');
                        chapter.content = chapter.content.replace(regex, (match) => {
@@ -1795,7 +1776,7 @@
                            count++;
                            return match;
                        });
-                       
+
                        saveData();
                        showToast('替换成功', 'success');
                        performSearch();
@@ -1822,7 +1803,7 @@
                                chapter.content = chapter.content.replace(regex, replaceQuery.value);
                            }
                        });
-                       
+
                        saveData();
                        showToast(`已替换 ${count} 处内容`, 'success');
                        performSearch(); // 刷新结果（应该是空的了）
@@ -1931,7 +1912,7 @@
                        saveData();
                    });
                 };
-                
+
                 const copyChapter = (index) => {
                     const chapter = chapters.value[index];
                     const text = `${chapter.title}\n\n${chapter.content}`;
@@ -1957,7 +1938,7 @@
                        startGeneration();
                    });
                 };
-                
+
                 // 导出书籍功能
                 const exportBook = () => {
                    if (chapters.value.length === 0) {
@@ -1971,7 +1952,7 @@
                         content += `负面提示词：\n${novel.value.negativePrompt}\n\n`;
                     }
                     content += `===========================\n\n`;
-                    
+
                     chapters.value.forEach((chapter, index) => {
                         content += `第 ${index + 1} 章 ${chapter.title}\n\n`;
                         content += `${chapter.content}\n\n`;
@@ -1991,11 +1972,11 @@
                         .map((c, i) => c.summary ? `第 ${i + 1} 章摘要：\n${c.summary}` : null)
                         .filter(s => s)
                         .join('\n\n');
-                    
+
                     if (summaries) {
                         content += `===========================\n剧情摘要汇总\n===========================\n\n${summaries}`;
                     }
-                    
+
                     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
                     const filename = `${novel.value.title || '小说导出'}.txt`;
                     const native = window.RoleplayHubNative || (window.parent && window.parent.RoleplayHubNative);
@@ -2103,7 +2084,7 @@
                 const parseAndLoadImportedContent = (content) => {
                    // 1. 创建新书
                    const newId = createNewBook();
-                   
+
                    // 2. 解析内容
                    let newNovel = { title: '', worldView: '', negativePrompt: '', isAdultMode: false };
                    let newChapters = [];
@@ -2111,9 +2092,9 @@
                    // 使用更稳健的方式切分头部和主体
                    const mainSeparator = '===========================';
                    const firstSeparatorIndex = content.indexOf(mainSeparator);
-                   
+
                    if (firstSeparatorIndex === -1) throw new Error("文件格式不正确：缺少主要分隔符");
-                   
+
                    const header = content.substring(0, firstSeparatorIndex).trim();
                    // 跳过分隔符和可能紧随其后的换行符
                    let bodyText = content.substring(firstSeparatorIndex + mainSeparator.length).trim();
@@ -2121,13 +2102,13 @@
                    // 解析头部（书名和世界观）
                    const headerLines = header.split('\n');
                    newNovel.title = headerLines[0] || '无题';
-                   
+
                    const worldViewMarker = '简介/世界观：';
                    const negMarker = '负面提示词：';
-                   
+
                    const worldViewIndex = header.indexOf(worldViewMarker);
                    const negIndex = header.indexOf(negMarker);
-                   
+
                    if (worldViewIndex !== -1) {
                        if (negIndex !== -1 && negIndex > worldViewIndex) {
                            newNovel.worldView = header.substring(worldViewIndex + worldViewMarker.length, negIndex).trim();
@@ -2135,17 +2116,17 @@
                            newNovel.worldView = header.substring(worldViewIndex + worldViewMarker.length).trim();
                        }
                    }
-                   
+
                    if (negIndex !== -1) {
                         newNovel.negativePrompt = header.substring(negIndex + negMarker.length).trim();
                    }
 
                    // 解析章节、角色卡和摘要
                    // 顺序：正文 -> 角色卡 -> 摘要
-                   
+
                    const charSeparator = '===========================\n角色卡汇总\n===========================';
                    const summarySeparator = '===========================\n剧情摘要汇总\n===========================';
-                   
+
                    let chaptersText = bodyText;
                    let charsText = '';
                    let summariesText = '';
@@ -2203,7 +2184,7 @@
 
                        const titleLine = lines[0].trim();
                        const chapterContent = lines.slice(1).join('\n').trim();
-                       
+
                        // 从 "第 X 章 标题" 中提取纯标题
                        const titleMatch = titleLine.match(/第\s*\d+\s*章\s*(.*)/);
                        const chapterTitle = titleMatch ? titleMatch[1].trim() : titleLine;
@@ -2409,17 +2390,9 @@
                     }
                     isLoadingModels.value = true;
                     try {
-                        const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'models'), {
-                            headers: { 'Authorization': `Bearer ${settings.value.apiKey}` }
+                        const data = await window.RPHubApiClient.requestJson({
+                            url: buildApiEndpoint(settings.value.apiUrl, 'models'), apiKey: settings.value.apiKey
                         });
-                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        const responseText = await response.text();
-                        let data;
-                        try {
-                            data = JSON.parse(responseText);
-                        } catch (_) {
-                            throw new Error('模型接口返回了网页内容，请检查 API 地址');
-                        }
                         if (data.data) {
                             availableModels.value = data.data.sort((a, b) => a.id.localeCompare(b.id));
                         }
@@ -2516,12 +2489,12 @@
                     if (!book) return false;
 
                     currentBookId.value = id;
-                    
+
                     // 深拷贝以断开引用
                     novel.value = JSON.parse(JSON.stringify(book.novel));
                     structuredCharacters.value = JSON.parse(JSON.stringify(book.characters));
                     chapters.value = JSON.parse(JSON.stringify(book.chapters));
-                    
+
                     // 恢复 UI 状态
                     chapters.value.forEach(c => {
                         c.isExpanded = false;
@@ -2541,7 +2514,7 @@
                     };
                     const provider = apiProviders.value.find(item => item.id === settings.value.providerId);
                     if (provider) selectApiProvider(provider, false);
-                    
+
                     wordCountTarget.value = book.wordCountTarget || 2500;
                     return true;
                 };
@@ -2563,7 +2536,7 @@
                         const index = books.value.findIndex(b => b.id === id);
                         if (index !== -1) {
                             books.value.splice(index, 1);
-                            
+
                             // 如果删除的是当前书籍
                             if (id === currentBookId.value) {
                                 if (books.value.length > 0) {
@@ -2614,7 +2587,7 @@
                     }
                     const chapter = chapters.value[chapterIndex];
                     chapter.isGeneratingComments = true;
-                    
+
                     // 构建全文上下文
                     let fullContent = '';
                     chapters.value.forEach((c, i) => {
@@ -2637,22 +2610,13 @@
 5. 严禁输出任何 Markdown 代码块标记（如 \`\`\`json），直接输出纯 JSON 字符串。`;
 
                     try {
-                        const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
-                            body: JSON.stringify({
-                                model: commentModel,
-                                messages: [
-                                    { role: "user", content: fullContent + "\n\n" + prompt }
-                                ],
-                                stream: false
-                            })
+                        const result = await requestNovelCompletion({
+                            model: commentModel,
+                            messages: [{ role: 'user', content: fullContent + "\n\n" + prompt }],
+                            stream: false
                         });
+                        let content = result.content;
 
-                        if (!response.ok) throw new Error(response.statusText);
-                        const data = await response.json();
-                        let content = data.choices[0].message.content;
-                        
                         // 清理可能存在的 Markdown 标记
                         content = content.replace(/```json/g, '').replace(/```/g, '').trim();
 
@@ -2691,7 +2655,7 @@
                                 replies: []
                             }));
                         }
-                        
+
                         saveData();
                     } catch (e) {
                         console.error('生成评论失败:', e);
@@ -2724,7 +2688,7 @@
                     }
 
                     let count = generateCount.value;
-                    
+
                     chapters.value.forEach(c => c.isExpanded = false);
                     mobileSidebarOpen.value = false; // 生成时自动关闭侧边栏
 
@@ -2733,15 +2697,15 @@
                             isGenerating.value = false;
                             return;
                         }
-                        
+
                         streamContent.value = '';
                         abortController.value = new AbortController();
-                        
+
                         const context = [];
                         const charPrompt = charactersPromptString.value;
 
                         let systemPrompt = `你是一个专业的小说家。请根据以下设定写一章小说。
-                        
+
 小说标题：${novel.value.title}
 世界观：${novel.value.worldView}
 ${novel.value.negativePrompt ? `\n【重要】负面提示词（绝对禁止出现的内容）：\n${novel.value.negativePrompt}\n` : ''}
@@ -2806,22 +2770,11 @@ ${charPrompt}
                         // 打印发送给 AI 的完整内容
 
                         try {
-                            const response = await fetch(buildApiEndpoint(settings.value.apiUrl, 'chat/completions'), {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${settings.value.apiKey}` },
-                                body: JSON.stringify({
-                                    model: settings.value.model,
-                                    messages: context,
-                                    stream: true,
-                                    temperature: 1.0
-                                }),
-                                signal: abortController.value.signal
-                            });
-
-                            if (!response.ok) throw new Error(response.statusText);
-
                             let fullContent = '';
-                            await readSseContent(response, content => {
+                            await requestNovelCompletion({
+                                model: settings.value.model, messages: context, stream: true,
+                                temperature: 1.0, signal: abortController.value.signal
+                            }, content => {
                                 fullContent += content;
                                 streamContent.value = fullContent;
                                 nextTick(() => { if (mainScroll.value) mainScroll.value.scrollTop = mainScroll.value.scrollHeight; });
@@ -2838,7 +2791,7 @@ ${charPrompt}
                                 content = summarySplit[0].trim();
                                 summary = summarySplit[1].trim();
                             }
-                            
+
                             // 重新处理标题（基于去除了摘要的内容）
                             const contentLines = content.split('\n');
                             if (contentLines.length > 0) {
@@ -2870,12 +2823,12 @@ ${charPrompt}
                             streamContent.value = '';
                             nextChapterPrompt.value = '';
                             saveData();
-                            
+
                             // 生成评论
                             generateChapterComments(newChapterIndex);
 
                             count--;
-                            
+
                             if (count > 0 && isGenerating.value) {
                                 setTimeout(generateLoop, 1000);
                             } else {
@@ -2893,7 +2846,7 @@ ${charPrompt}
                             }
                         }
                     };
-                    
+
                     isGenerating.value = true;
                     generateLoop();
                 };
@@ -2940,7 +2893,6 @@ ${charPrompt}
     </script>
 </body>
 </html>
-
 
 
 

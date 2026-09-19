@@ -31,6 +31,18 @@ Entries discovered by the Agent during task execution should follow this format:
 
 ## Entries
 
+[提交确认偏好]
+- Date: 2026-09-19
+- Context: 用户要求直接提交更改，下次无需询问
+- Instructions:
+  - 完成更改并检查后直接提交相关文件，无需重复征求提交确认；推送与发布按用户明确授权范围执行。
+
+[版本递进要求]
+- Date: 2026-09-19
+- Context: 用户纠正本次交付仍沿用 rc-11
+- Instructions:
+  - 后续新增改动交付需递进版本号与 versionCode，即使上一版本发布失败也不沿用已打标签版本。本次从 rc-11（210）递进至 rc-12（211）。
+
 [版本号规则]
 - Date: 2026-08-16
 - Context: 交付 RoleplayHub 套壳 APK 时

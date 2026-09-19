@@ -214,50 +214,14 @@
     });
 })();
 
-// --- Memory utilities ---
+// --- Shared summary memory utilities ---
 (function () {
-    const STORY_TIME_VALUE_PATTERN = /^(\d{1,6})年(\d{1,2})月(\d{1,2})日[ \t]+(\d{1,2})时$/;
-    const STORY_TIME_LINE_PATTERN = /^[ \t]*【(\d{1,6})年(\d{1,2})月(\d{1,2})日[ \t]+(\d{1,2})时】[ \t]*(?=\r?\n|$)/;
-
-    const formatStoryTimeMatch = (match) => {
-        if (!match) return '';
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-        const hour = Number(match[4]);
-        const year = Number(match[1]);
-        const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-        const maxDay = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] || 0;
-        if (year <= 0 || day < 1 || day > maxDay || hour < 0 || hour > 23) return '';
-        return `${match[1]}年${String(month).padStart(2, '0')}月${String(day).padStart(2, '0')}日 ${String(hour).padStart(2, '0')}时`;
-    };
-
-    const normalizeStoryTime = (value) => formatStoryTimeMatch(
-        String(value || '').trim().match(STORY_TIME_VALUE_PATTERN)
-    );
-
-    const extractStoryTime = (text) => formatStoryTimeMatch(
-        String(text || '').match(STORY_TIME_LINE_PATTERN)
-    );
-
-    const stripStoryTimeLine = (text) => {
-        const source = String(text || '');
-        if (!extractStoryTime(source)) return source;
-        return source.replace(STORY_TIME_LINE_PATTERN, '').replace(/^\r?\n/, '').trimStart();
-    };
-
-    const isEmbeddingLike = (value) => Array.isArray(value) || ArrayBuffer.isView(value);
-    const hasVectorEmbedding = (memory) => (
-        (isEmbeddingLike(memory?.embedding) && memory.embedding.length > 0)
-        || (typeof memory?.embeddingQ === 'string' && memory.embeddingQ.length > 0)
-    );
-    const isVectorMemory = (memory) => memory?.vectorMemory === true
-        && memory.chunkMode === 'paragraph'
-        && hasVectorEmbedding(memory);
-    const isEnabledVectorMemory = (memory) => isVectorMemory(memory) && memory.enabled !== false;
+    const isEmbeddingLike = value => Array.isArray(value) || ArrayBuffer.isView(value);
     const markRuntimeRaw = (value) => {
         if (!value || typeof value !== 'object') return value;
         return typeof Vue?.markRaw === 'function' ? Vue.markRaw(value) : value;
     };
+
 
     const bytesToBase64 = (bytes) => {
         const source = bytes instanceof Uint8Array
@@ -303,34 +267,6 @@
         };
     };
 
-    const prepareMemoryForRuntime = (memory) => {
-        if (!memory || typeof memory !== 'object') return memory;
-        delete memory.depth;
-        const storyTime = normalizeStoryTime(memory.storyTime)
-            || extractStoryTime(memory.paragraph || memory.sourceText || memory.summary);
-        if (storyTime) memory.storyTime = storyTime;
-        else delete memory.storyTime;
-
-        if (typeof memory.embeddingQ === 'string' && memory.embeddingQ.length > 0) {
-            try {
-                memory.embedding = markRuntimeRaw(base64ToInt8Array(memory.embeddingQ));
-            } catch (_) {
-                memory.embedding = [];
-            }
-        } else if (isEmbeddingLike(memory.embedding)) {
-            const packed = quantizeEmbeddingForStorage(memory.embedding);
-            if (packed) {
-                Object.assign(memory, packed);
-                memory.embedding = markRuntimeRaw(base64ToInt8Array(packed.embeddingQ));
-            }
-        }
-        if (isEmbeddingLike(memory.embedding)) memory.embedding = markRuntimeRaw(memory.embedding);
-        return markRuntimeRaw(memory);
-    };
-
-    const prepareMemoriesForRuntime = (items) => Array.isArray(items)
-        ? items.filter(isVectorMemory).map(prepareMemoryForRuntime)
-        : [];
 
     const normalizeClassicMemoryForRuntime = (memory, includeSources = true) => {
         if (memory?.classicMemory !== true || !String(memory.summary || '').trim()) return null;
@@ -365,76 +301,6 @@
         ? items.map(memory => normalizeClassicMemoryForRuntime(memory)).filter(Boolean)
         : [];
 
-    const splitLongMemoryParagraph = (paragraph, maxLength = 1800) => {
-        const text = String(paragraph || '').trim();
-        if (!text) return [];
-        if (text.length <= maxLength) return [text];
-
-        const parts = [];
-        let remaining = text;
-        while (remaining.length > maxLength) {
-            const windowText = remaining.slice(0, maxLength);
-            const breakAt = Math.max(
-                windowText.lastIndexOf('。'),
-                windowText.lastIndexOf('！'),
-                windowText.lastIndexOf('？'),
-                windowText.lastIndexOf('.'),
-                windowText.lastIndexOf('!'),
-                windowText.lastIndexOf('?'),
-                windowText.lastIndexOf('\n')
-            );
-            const cutAt = breakAt > Math.floor(maxLength * 0.55) ? breakAt + 1 : maxLength;
-            parts.push(remaining.slice(0, cutAt).trim());
-            remaining = remaining.slice(cutAt).trim();
-        }
-        if (remaining) parts.push(remaining);
-        return parts.filter(Boolean);
-    };
-
-    const splitMemoryParagraphs = (text) => {
-        const cleanText = String(text || '')
-            .replace(/\r\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        if (!cleanText) return [];
-
-        return cleanText
-            .split(/\n\s*\n/g)
-            .map(paragraph => paragraph.trim())
-            .filter(Boolean)
-            .flatMap(paragraph => splitLongMemoryParagraph(paragraph));
-    };
-
-    const mergeSmallMemoryParagraphs = (paragraphs, maxLength = 400) => {
-        const merged = [];
-        let current = null;
-        const flush = () => {
-            if (!current) return;
-            merged.push(current);
-            current = null;
-        };
-
-        paragraphs.forEach((paragraph, index) => {
-            const text = String(paragraph || '').trim();
-            if (!text) return;
-            const paragraphNo = index + 1;
-            if (!current) {
-                current = { text, start: paragraphNo, end: paragraphNo };
-                return;
-            }
-            const candidateText = `${current.text}\n\n${text}`;
-            if (candidateText.length <= maxLength) {
-                current.text = candidateText;
-                current.end = paragraphNo;
-                return;
-            }
-            flush();
-            current = { text, start: paragraphNo, end: paragraphNo };
-        });
-
-        flush();
-        return merged;
-    };
 
     const trimMemoryText = (text, maxLength = 1800) => {
         const cleanText = String(text || '').replace(/\n{3,}/g, '\n\n').trim();
@@ -446,156 +312,60 @@
         return ids.length > 0 ? ids.join('|') : `turn:${Number(turn) || 0}`;
     };
 
-    const normalizeEmbedding = (embedding) => {
-        const rawVector = isEmbeddingLike(embedding)
-            ? embedding
-            : (isEmbeddingLike(embedding?.values) ? embedding.values : []);
-        return rawVector
-            .map(value => Number(value))
-            .filter(value => Number.isFinite(value));
+
+    const normalizeEmbedding = embedding => {
+        const values = isEmbeddingLike(embedding) ? Array.from(embedding) : [];
+        return values.length && values.every(value => typeof value === 'number' && Number.isFinite(value))
+            ? values : [];
     };
 
     const cosineSimilarity = (a, b) => {
-        if (!isEmbeddingLike(a) || !isEmbeddingLike(b) || a.length === 0 || b.length === 0) return -1;
-        const length = Math.min(a.length, b.length);
-        let dot = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < length; i++) {
-            const av = Number(a[i]) || 0;
-            const bv = Number(b[i]) || 0;
-            dot += av * bv;
-            normA += av * av;
-            normB += bv * bv;
+        if (!isEmbeddingLike(a) || !isEmbeddingLike(b) || !a.length || a.length !== b.length) return -1;
+        let dot = 0, normA = 0, normB = 0;
+        for (let i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
         }
-        if (normA === 0 || normB === 0) return -1;
-        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+        return normA && normB ? dot / Math.sqrt(normA * normB) : -1;
     };
 
-    const normalizeVectorMemoryFingerprintText = (text) => String(text || '')
-        .replace(/\s+/g, '')
-        .replace(/[，。、“”‘’：；！？,.!?;:"'`~]/g, '');
+    // 二次压缩仍保留逐轮总结；增强模式只索引这些基础总结。
+    const getSummarySources = items => (Array.isArray(items) ? items : []).flatMap(memory => {
+        if (memory?.enabled === false) return [];
+        return memory?.secondaryCompressed
+            ? getSummarySources(memory.sourceMemories)
+            : memory?.classicMemory && memory.summary ? [memory] : [];
+    });
 
-    const getVectorMemoryContentFingerprint = (text) => {
-        const normalized = normalizeVectorMemoryFingerprintText(text);
-        return normalized.length >= 80 ? normalized.slice(0, 1000) : '';
+    const embeddingCache = new WeakMap();
+    const getSummaryEmbedding = memory => {
+        if (!memory?.embeddingQ) return [];
+        const cached = embeddingCache.get(memory);
+        if (cached?.encoded === memory.embeddingQ) return cached.value;
+        try {
+            const value = base64ToInt8Array(memory.embeddingQ);
+            if (value.length !== memory.embeddingDims) return [];
+            embeddingCache.set(memory, { encoded: memory.embeddingQ, value });
+            return value;
+        } catch (_) {
+            return [];
+        }
     };
 
-    const extractVectorQueryTerms = (text) => {
-        const normalized = String(text || '')
-            .replace(/[^\p{Script=Han}A-Za-z0-9_]+/gu, ' ')
-            .trim();
-        if (!normalized) return [];
-
-        const stopTerms = new Set([
-            '是不是', '有没有', '为什么', '怎么样', '怎么办', '什么', '这个', '那个',
-            '还是', '还在', '还会', '了吗', '吗', '呢', '啊', '吧', '的', '了', '我', '你', '她', '他'
-        ]);
-        const terms = new Set();
-        normalized.split(/\s+/).filter(Boolean).forEach(part => {
-            if (/^[A-Za-z0-9_]{2,}$/.test(part)) {
-                terms.add(part.toLowerCase());
-                return;
-            }
-            const han = part.replace(/[^\p{Script=Han}]/gu, '');
-            if (han.length >= 2) {
-                for (let size = Math.min(4, han.length); size >= 2; size--) {
-                    for (let index = 0; index <= han.length - size; index++) {
-                        const term = han.slice(index, index + size);
-                        if (!stopTerms.has(term)) terms.add(term);
-                    }
-                }
-            } else if (han.length === 1 && !stopTerms.has(han)) {
-                terms.add(han);
-            }
-        });
-        return [...terms]
-            .filter(term => term.length > 0 && !stopTerms.has(term))
-            .sort((a, b) => b.length - a.length)
-            .slice(0, 20);
-    };
-
-    const getVectorLexicalMatch = (memory, queryTerms) => {
-        if (!Array.isArray(queryTerms) || queryTerms.length === 0) return { hits: 0, boost: 0, matched: [] };
-        const text = String(`${memory?.sourceText || ''}\n${memory?.summary || ''}`).toLowerCase();
-        const matched = queryTerms.filter(term => text.includes(String(term).toLowerCase()));
-        return {
-            hits: matched.length,
-            boost: Math.min(0.08, matched.length * 0.015),
-            matched
-        };
-    };
-
-    const sortVectorMemoriesByTime = (items) => {
-        const orderNumber = (value, fallback) => {
-            if (value === null || value === undefined || value === '') return fallback;
-            const number = Number(value);
-            return Number.isFinite(number) ? number : fallback;
-        };
-        return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
-            const turnDiff = orderNumber(a?.turn, Number.MAX_SAFE_INTEGER) - orderNumber(b?.turn, Number.MAX_SAFE_INTEGER);
-            if (turnDiff !== 0) return turnDiff;
-            const sequenceDiff = orderNumber(a?.sequence, 0) - orderNumber(b?.sequence, 0);
-            return sequenceDiff !== 0 ? sequenceDiff : (b?.vectorScore || 0) - (a?.vectorScore || 0);
-        });
-    };
-
-    const getVectorMemoryText = (memory) => String(
-        memory?.paragraph || memory?.summary || memory?.sourceText || ''
-    ).trim();
-
-    const getVectorMemoryFingerprint = (memory) => (
-        getVectorMemoryContentFingerprint(getVectorMemoryText(memory))
-        || `${memory?.turn || ''}:${memory?.sequence || ''}:${normalizeVectorMemoryFingerprintText(getVectorMemoryText(memory))}`
-    );
-
-    const buildMergedVectorMemoryFallbackText = (items) => {
-        const orderedItems = sortVectorMemoriesByTime(items);
-        let userBlock = '';
-        const roleBlocks = [];
-        orderedItems.forEach(memory => {
-            const text = getVectorMemoryText(memory);
-            if (!text) return;
-            const roleMarker = '\n角色卡：';
-            const roleIndex = text.indexOf(roleMarker);
-            if (roleIndex >= 0) {
-                if (!userBlock) userBlock = text.slice(0, roleIndex).trim();
-                const roleText = text.slice(roleIndex + roleMarker.length).trim();
-                if (roleText) roleBlocks.push(roleText);
-            } else if (!roleBlocks.includes(text)) {
-                roleBlocks.push(text);
-            }
-        });
-        const roleBlock = roleBlocks.filter(Boolean).join('\n\n').trim();
-        return [userBlock, roleBlock ? `角色卡：${roleBlock}` : ''].filter(Boolean).join('\n\n').trim();
-    };
+    const buildSummaryEmbeddingText = memory =>
+        `用户原输入：\n${memory.sourceUserText || ''}\n\n本轮总结：\n${memory.summary || ''}`;
 
     window.RPHubMemoryUtils = Object.freeze({
-        buildMergedVectorMemoryFallbackText,
+        buildSummaryEmbeddingText,
         cosineSimilarity,
-        extractStoryTime,
-        extractVectorQueryTerms,
         getClassicMemoryKey,
-        getVectorMemoryContentFingerprint,
-        getVectorMemoryFingerprint,
-        getVectorMemoryText,
-        getVectorLexicalMatch,
-        hasVectorEmbedding,
-        isEmbeddingLike,
-        isEnabledVectorMemory,
-        isVectorMemory,
+        getSummaryEmbedding,
+        getSummarySources,
         markRuntimeRaw,
-        mergeSmallMemoryParagraphs,
         normalizeEmbedding,
-        normalizeStoryTime,
         prepareClassicMemoriesForRuntime,
-        prepareMemoryForRuntime,
-        prepareMemoriesForRuntime,
         quantizeEmbeddingForStorage,
-        splitLongMemoryParagraph,
-        splitMemoryParagraphs,
-        sortVectorMemoriesByTime,
-        stripStoryTimeLine,
         trimMemoryText
     });
 })();
@@ -603,10 +373,6 @@
 // --- Context utilities ---
 (function () {
     const { prompts: BUILTIN_PROMPTS } = window.RPHubBuiltinContent;
-    const ROLE_MEMORY_VECTOR_RECALL_TAG = 'role_memory_vector_recall';
-    const ROLE_MEMORY_VECTOR_RECALL_OPEN_TAG = `<${ROLE_MEMORY_VECTOR_RECALL_TAG}>`;
-    const ROLE_MEMORY_VECTOR_RECALL_CLOSE_TAG = `</${ROLE_MEMORY_VECTOR_RECALL_TAG}>`;
-
     const escapeXmlAttribute = (value) => String(value ?? '')
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')
@@ -624,14 +390,27 @@
             .join('\n');
     };
 
-    const isVectorMemoryRecallContent = (content) => {
-        const text = String(content || '').trimStart();
-        return text.startsWith(ROLE_MEMORY_VECTOR_RECALL_OPEN_TAG)
-            || text.startsWith('[角色记忆 - 向量召回]');
-    };
-    const isRoleMemoryContextContent = (content) => {
-        const text = String(content || '').trimStart();
-        return text.startsWith('[角色记忆') || text.startsWith(ROLE_MEMORY_VECTOR_RECALL_OPEN_TAG);
+    const isRoleMemoryContextContent = content => String(content || '').trimStart().startsWith('[角色记忆');
+
+    const appendEnhancedMemoryRecall = (messages, memories) => {
+        if (!memories.length) return messages;
+        let index = messages.length - 1;
+        while (index >= 0 && (messages[index].role !== 'user' || messages[index].tool_calls)) index--;
+        if (index < 0) return messages;
+        const block = [
+            '<enhanced_memory_recall>',
+            ...BUILTIN_PROMPTS.enhancedMemoryRecallDescription,
+            ...memories.map(memory => [
+                `  <memory_fragment turn="${escapeXmlAttribute(memory.turn)}" similarity="${(memory.score * 100).toFixed(1)}%">`,
+                `    <user_input>${escapeXmlText(memory.sourceUserText)}</user_input>`,
+                `    <summary>${escapeXmlText(memory.summary)}</summary>`,
+                '  </memory_fragment>'
+            ].join('\n')),
+            '</enhanced_memory_recall>'
+        ].join('\n');
+        return messages.map((message, messageIndex) => messageIndex === index
+            ? { ...message, content: `${message.content}\n\n${block}`, _enhancedMemoryRecallCount: memories.length }
+            : message);
     };
 
     const getMessageSourceIndexes = (message, index, trackSources) => {
@@ -918,26 +697,21 @@
                 if (entry) injectedWorldInfos.set(getDisplayName(entry), getTriggerText(entry));
             });
 
-            const isMemory = message.role !== 'system' && isRoleMemoryContextContent(message.content);
+            const recallCount = Number(message._enhancedMemoryRecallCount) || 0;
+            const isMemory = recallCount > 0 || (message.role !== 'system' && isRoleMemoryContextContent(message.content));
             if (isMemory) {
-                const memoryContent = String(message.content || '');
-                const fragmentCount = (memoryContent.match(/<memory_fragment\b/gi) || []).length;
-                const closedFragmentCount = (memoryContent.match(/<\/memory_fragment>/gi) || []).length;
-                const legacyFragmentCount = memoryContent.split('\n')
-                    .filter(line => /^<第\s*.+?次对话_相似度\s+.+>$/.test(line.trim())).length;
-                const vectorFragmentCount = fragmentCount > 0
-                    ? Math.max(1, closedFragmentCount > 0 ? fragmentCount : Math.ceil(fragmentCount / 2))
-                    : legacyFragmentCount;
-                const isVectorMemory = isVectorMemoryRecallContent(memoryContent);
-                const memoryName = isVectorMemory ? '角色记忆（向量召回）' : '角色记忆';
-                const memoryTrigger = isVectorMemory ? `已注入 ${vectorFragmentCount} 个向量分片` : '已注入';
+                const memoryName = recallCount ? '增强记忆召回' : '角色记忆';
+                const memoryTrigger = recallCount ? `已注入 ${recallCount} 条总结` : '已注入';
                 injectedWorldInfos.set(memoryName, memoryTrigger);
                 if (!triggeredWorldInfos.some(item => item.name === memoryName)) {
                     triggeredWorldInfos.push({ name: memoryName, triggers: memoryTrigger });
                 }
             }
 
-            let renderedContent = escapeHtml(message.content);
+            const content = message.tool_calls
+                ? JSON.stringify({ content: message.content, tool_calls: message.tool_calls }, null, 2)
+                : String(message.content || '');
+            let renderedContent = escapeHtml(content);
             Array.from(floorInfo.keys()).sort((a, b) => b.length - a.length).forEach(key => {
                 if (!key) return;
                 const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -947,21 +721,16 @@
                 );
             });
             if (isMemory) {
-                renderedContent = renderedContent
-                    .replace(/&lt;\/?(?:role_memory_vector_recall|memory_fragment)\b[\s\S]*?&gt;/g,
-                        '<mark class="bg-purple-200/80 text-purple-900 border-b border-purple-400 font-bold px-1 rounded shadow-sm">$&</mark>')
-                    .replace(/\[角色记忆[^\]]*\]/g,
-                        '<mark class="bg-purple-200/80 text-purple-900 border-b border-purple-400 font-bold px-1 rounded shadow-sm">$&</mark>')
-                    .replace(/\[——[^—]*——\]/g,
-                        '<mark class="bg-purple-100/80 text-purple-700 font-semibold px-0.5 rounded">$&</mark>')
-                    .replace(/\[向量召回[^\]]*\]/g,
-                        '<mark class="bg-teal-100/90 text-teal-800 border-b border-teal-300 font-semibold px-0.5 rounded">$&</mark>');
+                renderedContent = renderedContent.replace(
+                    /&lt;\/?(?:enhanced_memory_recall|memory_fragment)\b[\s\S]*?&gt;/g,
+                    '<mark class="bg-purple-200/80 text-purple-900 border-b border-purple-400 font-bold px-1 rounded shadow-sm">$&</mark>'
+                );
             }
 
             return {
                 role: message.role,
                 name: message.name,
-                content: message.content,
+                content,
                 renderedContent,
                 floor: Number.isFinite(message._contextFloor) ? ++displayedFloor : null,
                 isMemory,
@@ -975,8 +744,6 @@
     const injectContextMessages = ({
         messages,
         worldInfoGroups,
-        vectorMemories = [],
-        vectorDepth = 4,
         safeTargetLimit = 1
     }) => {
         const groups = worldInfoGroups || {};
@@ -1008,33 +775,6 @@
             });
         });
 
-        if (vectorMemories.length > 0) {
-            const memoryContent = vectorMemories.map(memory => {
-                const turn = escapeXmlAttribute(memory.turn || '?');
-                const score = escapeXmlAttribute(Number.isFinite(memory.vectorScore)
-                    ? `${(memory.vectorScore * 100).toFixed(1)}%`
-                    : 'unknown');
-                const storyTime = escapeXmlAttribute(memory.storyTime || '');
-                const fragmentText = indentXmlText(memory.paragraph || memory.summary || '', 4);
-                return [
-                    `  <memory_fragment turn="${turn}" similarity="${score}" story_time="${storyTime}">`,
-                    fragmentText,
-                    '  </memory_fragment>'
-                ].join('\n');
-            }).join('\n\n');
-            finalMessages.splice(findDepthIndex(Number(vectorDepth) || 4), 0, {
-                role: 'user',
-                content: [
-                    ROLE_MEMORY_VECTOR_RECALL_OPEN_TAG,
-                    '  <description>',
-                    ...BUILTIN_PROMPTS.vectorMemoryRecallDescription,
-                    '  </description>',
-                    memoryContent,
-                    ROLE_MEMORY_VECTOR_RECALL_CLOSE_TAG
-                ].join('\n')
-            });
-        }
-
         const userTopEntries = Array.isArray(groups.user_top) ? groups.user_top : [];
         if (userTopEntries.length > 0) {
             const lastUserMessage = finalMessages.slice().reverse().find(message => message.role === 'user');
@@ -1062,9 +802,7 @@
     };
 
     window.RPHubContextUtils = {
-        ROLE_MEMORY_VECTOR_RECALL_CLOSE_TAG,
-        ROLE_MEMORY_VECTOR_RECALL_OPEN_TAG,
-        ROLE_MEMORY_VECTOR_RECALL_TAG,
+        appendEnhancedMemoryRecall,
         buildContextViewerState,
         buildConversationTurnSnapshot,
         escapeXmlAttribute,
@@ -1074,7 +812,6 @@
         indentXmlText,
         injectContextMessages,
         isRoleMemoryContextContent,
-        isVectorMemoryRecallContent,
         mergeConsecutiveRoleMessages,
         postprocessContextMessages,
         resolveWorldInfoEntries,
@@ -1293,7 +1030,7 @@
             Object.entries(log.changes || {}).forEach(([key, change]) => {
                 if (!initializedKeys.has(key) && change && Object.prototype.hasOwnProperty.call(change, 'from')) {
                     if (key === '$root') baseState = cloneUiValue(change.from) || {};
-                    else baseState[key] = change.from;
+                    else baseState = setUiTemplateValue(baseState, key, change.from);
                     initializedKeys.add(key);
                 }
             });
@@ -1643,7 +1380,9 @@ ${content}
 
     const findUiTemplateUpdateBlock = (text) => {
         const source = String(text || '');
-        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(source, /<ui_template_updates\b[^>]*>/i);
+        const taggedCandidate = window.RPHubCardUtils.findLastUnprotectedMatch(
+            source, /<ui_template_updates\b[^>]*>/i, { includeUiTemplateUpdates: true }
+        );
         const taggedTail = taggedCandidate ? source.slice(taggedCandidate.index).trimEnd() : '';
         const tagged = taggedTail.match(/^<ui_template_updates\b[^>]*>([\s\S]*?)(?:<\/ui_template_updates>)?$/i);
         if (tagged) {
@@ -1660,250 +1399,102 @@ ${content}
         return match ? source.slice(0, match.index).trimEnd() : source;
     };
 
-    const parseUiTemplateUpdates = (rawContent) => {
-        const normalizedContent = String(rawContent || '')
-            .replace(/^<ui_template_updates\b[^>]*>\s*/i, '')
-            .replace(/\s*<\/ui_template_updates>$/i, '')
+    const parseUiTemplateUpdates = (rawContent, expectedTemplates = []) => {
+        const source = String(rawContent || '').trim()
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/i, '')
             .trim();
-        const lines = normalizedContent ? normalizedContent.split(/\r?\n/) : [];
-        const updates = [];
-        const parseError = (message, lineNumber) => {
-            const error = new SyntaxError(`简化变量格式错误：第 ${lineNumber} 行${message}`);
-            error.jsonSource = normalizedContent;
-            error.jsonLine = lineNumber;
-            throw error;
-        };
-        const parseVariableLines = (items, startLine) => {
-            const variables = {};
-            for (let index = 0; index < items.length; index += 1) {
-                const item = items[index];
-                const lineNumber = item.lineNumber || startLine;
-                const text = String(item.text || '').replace(/^(?:&#x20;)+/, '').trim();
-                if (!text) continue;
-                const separator = text.indexOf('=');
-                if (separator <= 0) parseError('应为“路径=值”', lineNumber || startLine);
-                const path = text.slice(0, separator).trim();
-                if (!path) parseError('缺少变量路径', lineNumber || startLine);
-                let rawValue = text.slice(separator + 1).trim();
-                if (!rawValue) {
-                    variables[path] = '';
-                    continue;
-                }
-                let parsedValue;
-                try {
-                    parsedValue = JSON.parse(rawValue);
-                } catch (error) {
-                    if (!/^[\[{]/.test(rawValue)) {
-                        variables[path] = rawValue;
-                        continue;
-                    }
-                    let completed = false;
-                    for (let nextIndex = index + 1; nextIndex < items.length; nextIndex += 1) {
-                        const continuation = String(items[nextIndex].text || '')
-                            .replace(/^(?:&#x20;)+/, '')
-                            .trim();
-                        if (!continuation) continue;
-                        rawValue += `\n${continuation}`;
-                        try {
-                            parsedValue = JSON.parse(rawValue);
-                            index = nextIndex;
-                            completed = true;
-                            break;
-                        } catch (continuationError) {
-                            // Continue collecting a multi-line JSON array/object.
-                        }
-                    }
-                    if (!completed) parseError('右侧数组或对象没有完整结束，必须写成有效JSON', lineNumber);
-                }
-                variables[path] = parsedValue;
-            }
-            return variables;
-        };
-        let currentId = '';
-        let currentLines = [];
-        let hasIdSections = false;
-        lines.forEach((rawLine, index) => {
-            const text = rawLine.trim();
-            const lineNumber = index + 1;
-            if (!text) return;
-            const open = text.match(/^<id\s*=\s*([^>]+)>$/i);
-            const close = text.match(/^<\/id\s*=\s*([^>]+)>$/i);
-            if (open) {
-                if (currentId) parseError('不能嵌套模板ID区块', lineNumber);
-                if (!hasIdSections && currentLines.length) parseError('多个模板时所有变量都必须写在模板ID区块内', lineNumber);
-                currentId = open[1].trim();
-                if (!currentId) parseError('缺少模板ID', lineNumber);
-                currentLines = [];
-                hasIdSections = true;
-                return;
-            }
-            if (close) {
-                if (!currentId) parseError('出现了没有对应开始标签的模板ID结束标签', lineNumber);
-                if (close[1].trim() !== currentId) parseError(`模板ID结束标签不匹配，应为“</id=${currentId}>”`, lineNumber);
-                updates.push({ id: currentId, variables: parseVariableLines(currentLines, lineNumber) });
-                currentId = '';
-                currentLines = [];
-                return;
-            }
-            if (hasIdSections && !currentId) parseError('模板ID区块之间只能留空行', lineNumber);
-            currentLines.push({ text, lineNumber });
-        });
-        if (currentId) parseError(`缺少结束标签“</id=${currentId}>”`, lines.length || 1);
-        if (hasIdSections) return { updates };
-        return { updates: [{ id: '', variables: parseVariableLines(currentLines, 1) }] };
+        if (!source) return { updates: [] };
+        let parsed;
+        try {
+            parsed = JSON.parse(source);
+        } catch (error) {
+            const parseError = new SyntaxError(`JSON变量块格式错误：${error.message}`);
+            parseError.jsonSource = source;
+            throw parseError;
+        }
+        if (expectedTemplates.length > 1 && Array.isArray(parsed)
+            && parsed.every(item => item && typeof item === 'object' && !Array.isArray(item)
+                && typeof item.id === 'string' && Object.prototype.hasOwnProperty.call(item, 'variables'))) {
+            return { updates: parsed.map(item => ({ id: item.id.trim(), variables: item.variables })) };
+        }
+        return { updates: [{ id: '', variables: parsed }] };
     };
 
     const normalizeUiTemplateUpdateList = (parsed, expectedTemplates = []) => {
         const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+        const isUnsafeKey = key => ['__proto__', 'prototype', 'constructor'].includes(String(key));
+        const valueType = value => Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
         const issues = [];
         const updates = isRecord(parsed) && Array.isArray(parsed.updates) ? parsed.updates : [];
-        if (!isRecord(parsed) || !Array.isArray(parsed.updates)) issues.push('变量块缺少有效的更新分段');
-
+        if (!isRecord(parsed) || !Array.isArray(parsed.updates)) issues.push('变量块缺少有效的JSON更新内容');
+        if (!issues.length && !updates.length) return updates;
         const templatesById = new Map(expectedTemplates.map(template => [String(template.id), template]));
         const receivedById = new Map();
         updates.forEach((update, index) => {
-            const location = `第 ${index + 1} 项`;
-            if (!isRecord(update)) {
-                issues.push(`${location}不是有效对象`);
-                return;
-            }
-
-            const variables = update.variables;
-            if (!Object.prototype.hasOwnProperty.call(update, 'variables')) {
-                issues.push(`${location}缺少变量内容`);
-            } else if (variables === null || typeof variables !== 'object') {
-                issues.push(`${location}的“variables”必须是对象或数组`);
-            }
+            const location = '第 ' + (index + 1) + ' 项';
+            if (!isRecord(update)) { issues.push(location + '不是有效对象'); return; }
+            if (!Object.prototype.hasOwnProperty.call(update, 'variables')) { issues.push(location + '缺少 variables 字段'); return; }
+            if (update.variables === null || typeof update.variables !== 'object') { issues.push(location + '的 variables 必须是对象或数组'); return; }
             const unknownFields = Object.keys(update).filter(key => !['id', 'variables'].includes(key));
-            if (unknownFields.length) issues.push(`${location}包含未定义字段：${unknownFields.join('、')}`);
-
+            if (unknownFields.length) issues.push(location + '包含未定义字段：' + unknownFields.join('、'));
             const explicitId = typeof update.id === 'string' ? update.id.trim() : '';
             const id = explicitId || (expectedTemplates.length === 1 ? String(expectedTemplates[0].id) : '');
-            if (!id) {
-                issues.push(expectedTemplates.length > 1
-                    ? `${location}缺少模板ID；多个模板时不能使用无ID简化格式`
-                    : `${location}缺少有效模板ID`);
-                return;
-            }
-            if (!templatesById.has(id)) {
-                const validIds = [...templatesById.keys()];
-                const expected = validIds.length === 1
-                    ? `，当前模板ID应为“${validIds[0]}”`
-                    : `，可用模板ID：${validIds.map(value => `“${value}”`).join('、')}`;
-                issues.push(`${location}使用了未知模板ID“${id}”${expected}`);
-                return;
-            }
+            if (!id) { issues.push(expectedTemplates.length > 1 ? location + '缺少模板ID；多模板必须使用JSON数组成员的 id 字段' : location + '缺少有效模板ID'); return; }
+            if (!templatesById.has(id)) { issues.push(location + '使用了未知模板ID“' + id + '”'); return; }
             if (!receivedById.has(id)) receivedById.set(id, []);
-            receivedById.get(id).push({ variables });
+            receivedById.get(id).push({ variables: update.variables });
         });
-
+        const dynamicSamplesFor = (expected, path, schemaText) => {
+            if (!path) return undefined;
+            const escaped = String(path).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const hasIdMarker = String(schemaText || '').includes(path + '.{id}')
+                || String(schemaText || '').includes(path + '{id}');
+            const allowsNewKey = new RegExp('新增(?:键|\\s*id)[^\\n]*' + escaped, 'i').test(schemaText);
+            if (!hasIdMarker && !allowsNewKey) return undefined;
+            return expected.flatMap(Object.values);
+        };
+        const validateValue = (samples, actual, path, schemaText, unknownNames, invalidNames) => {
+            const typedSamples = samples.filter(sample => sample !== null && sample !== undefined);
+            if (actual === null && samples.includes(null)) return;
+            if (typedSamples.length && !typedSamples.some(sample => valueType(sample) === valueType(actual))) {
+                invalidNames.push(path || '$root');
+                return;
+            }
+            if (Array.isArray(actual)) {
+                // 所有原始成员共同定义合法字段；空数组不推断成员结构，但仍检查危险键。
+                const items = typedSamples.filter(Array.isArray).flat();
+                actual.forEach((item, index) => validateValue(items, item, (path || '$root') + '[' + index + ']', schemaText, unknownNames, invalidNames));
+                return;
+            }
+            if (isRecord(actual)) {
+                const objects = typedSamples.filter(isRecord);
+                Object.entries(actual).forEach(([key, value]) => {
+                    if (isUnsafeKey(key)) { unknownNames.push(path ? path + '.' + key : key); return; }
+                    const childPath = path ? path + '.' + key : key;
+                    let childSamples = objects.filter(object => Object.prototype.hasOwnProperty.call(object, key)).map(object => object[key]);
+                    if (!childSamples.length && objects.length) {
+                        childSamples = dynamicSamplesFor(objects, path, schemaText);
+                        if (childSamples === undefined) { unknownNames.push(childPath); return; }
+                    }
+                    validateValue(childSamples, value, childPath, schemaText, unknownNames, invalidNames);
+                });
+            }
+        };
         receivedById.forEach((received, id) => {
             const template = templatesById.get(id);
             const label = template.name || id;
-            const currentVariables = template.variableState || {};
-            const schemaText = stringifyUiSchema(template.variableSchema);
-            if (received.length > 1) issues.push(`模板“${label}”重复输出了 ${received.length} 次`);
-
-            const variables = received[0].variables;
-            if (Array.isArray(currentVariables)) {
-                if (!Array.isArray(variables)) issues.push(`模板“${label}”必须完整输出数组变量`);
-                return;
-            }
-            if (!isRecord(variables)) {
-                issues.push(`模板“${label}”的变量不是有效对象`);
-                return;
-            }
+            if (received.length > 1) issues.push('模板“' + label + '”重复输出了 ' + received.length + ' 次');
             const unknownNames = [];
             const invalidNames = [];
-            const dynamicRoots = new Set();
-            schemaText.split(/\r?\n/).filter(line => /新增键|新增\s*id|只增添\s*\/\s*修改/.test(line)).forEach(line => {
-                Object.keys(currentVariables).forEach(key => {
-                    if (line.includes(key)) dynamicRoots.add(key);
-                });
-            });
-            const dynamicPrefixes = [...schemaText.matchAll(/([A-Za-z][A-Za-z0-9_]*?)\{id\}/g)]
-                .map(match => match[1]);
-            const socialNodes = Array.isArray(variables.social_nodes) ? variables.social_nodes : currentVariables.social_nodes;
-            const socialIds = new Set((Array.isArray(socialNodes) ? socialNodes : []).map(node => String(node?.id || '')));
-            Object.entries(variables).forEach(([path, value]) => {
-                const match = path.match(/^social_nodes(?:\.\d+|\[\d+\])\.id$/);
-                if (match && value !== undefined && value !== null && String(value).trim()) {
-                    socialIds.add(String(value).trim());
-                }
-            });
-            const findExpectedPath = (expected, path) => {
-                let current = expected;
-                let appendedArray = null;
-                const parts = splitUiTemplatePath(path);
-                for (let index = 0; index < parts.length; index += 1) {
-                    const part = parts[index];
-                    if (Array.isArray(current) && /^\d+$/.test(part) && Number(part) === current.length && current.length > 0) {
-                        appendedArray = current;
-                        current = current[0];
-                        continue;
-                    }
-                    if ((!isRecord(current) && !Array.isArray(current)) || !Object.prototype.hasOwnProperty.call(current, part)) {
-                        if (index === parts.length - 1
-                            && appendedArray === currentVariables.social_nodes
-                            && ['id', 'name', 'relation', 'group', 'tags'].includes(part)) {
-                            return { found: true, value: undefined };
-                        }
-                        return { found: false, value: undefined };
-                    }
-                    appendedArray = null;
-                    current = current[part];
-                }
-                return { found: true, value: current };
-            };
-            const findDynamicExpected = (path) => {
-                const parts = splitUiTemplatePath(path);
-                const root = parts[0];
-                let sample;
-                if (parts.length > 1 && dynamicRoots.has(root) && isRecord(currentVariables[root])) {
-                    sample = Object.values(currentVariables[root])[0];
-                } else if (parts.length > 0) {
-                    const prefix = dynamicPrefixes.find(value => root.startsWith(value));
-                    const id = prefix ? root.slice(prefix.length) : '';
-                    if (!prefix || !id || !socialIds.has(id)) return { found: false };
-                    sample = Object.entries(currentVariables).find(([key]) => key.startsWith(prefix))?.[1];
-                } else {
-                    return { found: false };
-                }
-                if (parts.length <= (dynamicRoots.has(root) ? 2 : 1)) return { found: true, value: sample };
-                return findExpectedPath(sample, parts.slice(dynamicRoots.has(root) ? 2 : 1).join('.'));
-            };
-            const inspectVariables = (expected, actual, prefix = '') => {
-                Object.keys(actual).forEach(name => {
-                    const path = prefix ? `${prefix}.${name}` : name;
-                    const resolved = findExpectedPath(expected, name);
-                    if (!resolved.found) {
-                        const dynamic = findDynamicExpected(path);
-                        if (!dynamic.found) {
-                            unknownNames.push(path);
-                        } else if (isRecord(actual[name]) && isRecord(dynamic.value)) {
-                            inspectVariables(dynamic.value, actual[name], path);
-                        } else if ((Array.isArray(dynamic.value) && !Array.isArray(actual[name]))
-                            || (isRecord(dynamic.value) && !isRecord(actual[name]))) {
-                            invalidNames.push(path);
-                        }
-                    } else if (isRecord(actual[name])) {
-                        if (isRecord(resolved.value)) inspectVariables(resolved.value, actual[name], path);
-                        else invalidNames.push(path);
-                    } else if ((Array.isArray(resolved.value) && !Array.isArray(actual[name]))
-                        || (isRecord(resolved.value) && !isRecord(actual[name]))) {
-                        invalidNames.push(path);
-                    }
-                });
-            };
-            inspectVariables(currentVariables, variables);
-            if (unknownNames.length) issues.push(`模板“${label}”输出了未定义变量：${unknownNames.join('、')}`);
-            if (invalidNames.length) issues.push(`模板“${label}”变量结构错误：${invalidNames.join('、')}`);
+            // 字段定义不随运行状态缩减；旧模板沿用已有的初始状态推断。
+            validateValue([inferInitialUiTemplateState(template)], received[0].variables, '', stringifyUiSchema(template.variableSchema), unknownNames, invalidNames);
+            if (unknownNames.length) issues.push('模板“' + label + '”输出了未定义变量：' + unknownNames.join('、'));
+            if (invalidNames.length) issues.push('模板“' + label + '”变量类型或结构错误：' + invalidNames.join('、'));
         });
-
         if (issues.length) throw new Error(issues.join('；'));
         return updates;
     };
-
     const applyUiTemplateUpdateListToTemplate = (template, updates, { model = '', turn = null, source = 'ai' } = {}) => {
         let fieldCount = 0;
         let changed = false;
@@ -1912,9 +1503,24 @@ ${content}
             if (update.id && update.id !== template.id) return;
             if (update.variables === null || typeof update.variables !== 'object') return;
             const changes = {};
-            const variableEntries = Array.isArray(update.variables)
-                ? [['$root', update.variables]]
-                : Object.entries(update.variables);
+            const variableEntries = [];
+            const collectEntries = (value, path = '') => {
+                if (Array.isArray(value) || value === null || typeof value !== 'object') {
+                    if (path) variableEntries.push([path, value]);
+                    return;
+                }
+                const entries = Object.entries(value);
+                if (!entries.length && path) variableEntries.push([path, value]);
+                entries.forEach(([key, child]) => {
+                    const childPath = path ? `${path}.${key}` : key;
+                    const current = getUiTemplateValue(template.variableState || {}, childPath);
+                    if (child && typeof child === 'object' && !Array.isArray(child)
+                        && current && typeof current === 'object' && !Array.isArray(current)) collectEntries(child, childPath);
+                    else variableEntries.push([childPath, child]);
+                });
+            };
+            if (Array.isArray(update.variables)) variableEntries.push(['$root', update.variables]);
+            else collectEntries(update.variables);
             variableEntries.forEach(([key, value]) => {
                 const oldValue = key === '$root'
                     ? template.variableState
