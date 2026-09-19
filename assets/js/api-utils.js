@@ -394,6 +394,35 @@
         }
     };
 
-    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint });
+    const chatSlotModes = ['quality', 'balanced', 'fast'];
+    const bindChatModel = (settings, mode, model) => {
+        settings[`${mode}Model`] = model;
+        settings.chatModelBindings[mode] = {
+            model, providerId: settings.apiProviderId, apiUrl: settings.apiUrl
+        };
+    };
+    const migrateChatModelBindings = (settings) => {
+        // Only legacy records without binding metadata can inherit the saved editor provider.
+        if (settings.chatModelBindings !== null && settings.chatModelBindings !== undefined) return;
+        settings.chatModelBindings = {};
+        chatSlotModes.forEach(mode => bindChatModel(settings, mode, settings[`${mode}Model`] || ''));
+    };
+    const resolveChatModel = (settings, mode, providers) => {
+        const binding = settings.chatModelBindings?.[mode];
+        const model = settings[`${mode}Model`];
+        const provider = providers.find(item => item.id === binding?.providerId);
+        if (!model || !binding || binding.model !== model || !provider) {
+            throw new Error('当前聊天槽位的模型或供应商绑定无效，请重新选择模型');
+        }
+        const apiUrl = binding.providerId === settings.apiProviderId ? settings.apiUrl : provider.apiUrl;
+        const apiKey = binding.providerId === settings.apiProviderId
+            ? settings.apiKey : settings.apiProviderKeys?.[binding.providerId];
+        const normalize = value => String(value || '').trim().replace(/\/+$/, '');
+        if (!normalize(apiUrl) || normalize(apiUrl) !== normalize(binding.apiUrl) || !String(apiKey || '').trim()) {
+            throw new Error('当前聊天槽位的 API 配置为空或地址已变更，请检查原供应商配置并重新选择模型');
+        }
+        return { model, apiUrl, apiKey, url: buildApiEndpoint(apiUrl, 'chat/completions') };
+    };
+    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint, bindChatModel, migrateChatModelBindings, resolveChatModel });
     window.RPHubApiClient = Object.freeze({ requestChatCompletion, requestJson });
 })();

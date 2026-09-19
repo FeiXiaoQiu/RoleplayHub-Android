@@ -687,7 +687,7 @@
                 }
                 this.draftSlotModels[this.activeSlot] = this.draftSlotModels[this.activeSlot] === modelId ? '' : modelId;
                 this.draftSlotModels = [...this.draftSlotModels];
-                this.$emit('select-slots', [...this.draftSlotModels]);
+                this.$emit('select-slots', [...this.draftSlotModels], this.activeSlot);
             }
         },
         template: `

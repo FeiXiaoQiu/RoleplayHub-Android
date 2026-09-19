@@ -2677,7 +2677,7 @@
         <model-selector-modal :show="showModelSelector" :target="modelSelectionTarget"
             :search-query="modelSearchQuery" :active-tag="activeModelTag" :tags="modelTags"
             :models="filteredModels"
-            :slot-models="[settings.qualityModel, settings.balancedModel, settings.fastModel]"
+            :slot-models="['quality', 'balanced', 'fast'].map(mode => settings.chatModelBindings?.[mode]?.providerId === settings.apiProviderId ? settings[mode + 'Model'] : '')"
             :current-model="modelSelectionTarget === 'memoryEmbeddingModel' ? memorySettings.embeddingModel : (modelSelectionTarget === 'memoryClassicModel' ? memorySettings.classicModel : settings[modelSelectionTarget])"
             @close="showModelSelector = false" @select="selectModel" @select-slots="selectQuickModels"
             @update:search-query="modelSearchQuery = $event"

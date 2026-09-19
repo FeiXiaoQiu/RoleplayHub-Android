@@ -559,6 +559,8 @@ const app = createApp({
             apiKey: DEFAULT_API_CONFIG.apiKey,
             apiProviderId: DEFAULT_API_PROVIDER_ID,
             apiProviderKeys: {},
+            chatModelBindings: null,
+            chatModelMode: 'quality',
             customApiUrl: '',
             customApiUrl2: '',
             model: DEFAULT_API_CONFIG.qualityModel,
@@ -643,6 +645,7 @@ const app = createApp({
             }
         };
         const normalizeApiProviderSettings = () => {
+            const hadSavedProviderKey = Object.prototype.hasOwnProperty.call(settings.apiProviderKeys || {}, settings.apiProviderId);
             if (!settings.apiProviderKeys || typeof settings.apiProviderKeys !== 'object' || Array.isArray(settings.apiProviderKeys)) {
                 settings.apiProviderKeys = {};
             }
@@ -659,7 +662,7 @@ const app = createApp({
             }
             if (isCustomApiProviderId(settings.apiProviderId)) {
                 const urlKey = getCustomApiUrlKey(settings.apiProviderId);
-                settings[urlKey] = settings[urlKey] || settings.apiUrl || '';
+                if (typeof settings[urlKey] !== 'string') settings[urlKey] = '';
                 settings.apiUrl = settings[urlKey];
             } else {
                 provider = getApiProviderById(settings.apiProviderId) || getApiProviderById(DEFAULT_API_PROVIDER_ID);
@@ -668,7 +671,7 @@ const app = createApp({
             }
 
             selectedApiProviderId.value = settings.apiProviderId;
-            if (settings.apiKey && !settings.apiProviderKeys[settings.apiProviderId]) {
+            if (settings.apiKey && !hadSavedProviderKey) {
                 settings.apiProviderKeys[settings.apiProviderId] = settings.apiKey;
             }
             settings.apiKey = settings.apiProviderKeys[settings.apiProviderId] || '';
@@ -685,6 +688,8 @@ const app = createApp({
         const isCustomApiProvider = computed(() => isCustomApiProviderId(selectedApiProvider.value.id));
         const selectApiProvider = (provider) => {
             syncCurrentApiKeyToProvider();
+            availableModels.value = [];
+            showModelSelector.value = false;
             selectedApiProviderId.value = provider.id;
             settings.apiProviderId = provider.id;
             settings.apiUrl = isCustomApiProviderId(provider.id)
@@ -827,22 +832,7 @@ const app = createApp({
             }
         });
 
-        watch(() => [settings.apiUrl, settings.apiKey, settings.model], ([, , newModel]) => {
-            if (newModel !== settings.fastModel && newModel !== settings.balancedModel) {
-                settings.qualityModel = newModel; // 确保 qualityModel 也同步更新
-            }
-
-
-
-            // Update currentModelMode based on the actual selected model
-            if (newModel === settings.fastModel) {
-                currentModelMode.value = 'fast';
-            } else if (newModel === settings.balancedModel) {
-                currentModelMode.value = 'balanced';
-            } else {
-                currentModelMode.value = 'quality';
-            }
-
+        watch(() => [settings.apiUrl, settings.apiKey, settings.model], () => {
             syncSettingsToGenerator();
         }, { deep: true });
 
@@ -851,7 +841,16 @@ const app = createApp({
             syncSettingsToGenerator();
         });
 
-        const currentModelMode = ref('quality');
+        const currentModelMode = computed({
+            get: () => settings.chatModelMode,
+            set: mode => { settings.chatModelMode = mode; }
+        });
+        const getChatModelConnection = () => window.RPHubApiUtils.resolveChatModel(settings, currentModelMode.value, [
+            ...apiProviderOptions,
+            ...customApiProviderOptions.map(provider => ({
+                ...provider, apiUrl: settings[getCustomApiUrlKey(provider.id)]
+            }))
+        ]);
         const isGeminiModel = computed(() => /gemini/i.test(String(settings.model || '')));
         const isTruncationEnabled = computed(() => isGeminiModel.value && settings.preventTruncation);
         const modelMode = computed({
@@ -1380,7 +1379,7 @@ const app = createApp({
             toast: (...args) => showToast(...args)
         });
         const requestTrackedChatCompletion = (options, type) => {
-            const apiUrl = settings.apiUrl;
+            const apiUrl = options.apiUrl ?? settings.apiUrl;
             const request = { url: buildApiEndpoint(apiUrl, 'chat/completions'), apiKey: settings.apiKey, ...options };
             return requestChatCompletion({ ...request, onUsage: (usage, metrics) => recordApiUsage(usage, {
                 type, model: request.model, apiUrl, apiKey: request.apiKey, ...metrics
@@ -1752,10 +1751,18 @@ const app = createApp({
                         settings.apiProviderId = legacyProvider?.id || (savedSettings.apiUrl ? 'custom' : DEFAULT_API_PROVIDER_ID);
                         if (!legacyProvider && savedSettings.apiUrl) settings.customApiUrl = savedSettings.apiUrl;
                     }
+                    if (isCustomApiProviderId(settings.apiProviderId)) {
+                        const urlKey = getCustomApiUrlKey(settings.apiProviderId);
+                        if (!Object.prototype.hasOwnProperty.call(savedSettings, urlKey)) settings[urlKey] = savedSettings.apiUrl || '';
+                    }
+                    window.RPHubApiUtils.migrateChatModelBindings(settings);
                     normalizeApiProviderSettings();
                 } else {
+                    window.RPHubApiUtils.migrateChatModelBindings(settings);
                     normalizeApiProviderSettings();
                 }
+                if (!['quality', 'balanced', 'fast'].includes(settings.chatModelMode)) settings.chatModelMode = 'quality';
+                settings.model = settings[`${settings.chatModelMode}Model`] || '';
                 if ((!savedSettings || Number(savedSettings.fontFamilyVersion || 0) < 4) && settings.fontFamily === 'serif') {
                     settings.fontFamily = 'modern';
                 }
@@ -3377,6 +3384,8 @@ const app = createApp({
 
         // API & Models
         const fetchModels = async (isManual = false) => {
+            const providerId = settings.apiProviderId;
+            const apiUrl = settings.apiUrl;
             const apiKey = String(settings.apiKey || '').trim();
             if (!apiKey) {
                 if (isManual) showToast('请先填写当前 API 预设的 Key', 'info');
@@ -3384,8 +3393,9 @@ const app = createApp({
             }
             try {
                 if (isManual) showToast('正在获取模型列表...', 'info');
-                const url = buildApiEndpoint(settings.apiUrl, 'models');
+                const url = buildApiEndpoint(apiUrl, 'models');
                 const data = await requestJson({ url, apiKey });
+                if (settings.apiProviderId !== providerId || settings.apiUrl !== apiUrl || String(settings.apiKey || '').trim() !== apiKey) return;
                 availableModels.value = data.data || [];
                 if (isManual) showToast(`成功获取 ${availableModels.value.length} 个模型`, 'success');
             } catch (error) {
@@ -3405,20 +3415,13 @@ const app = createApp({
             showModelSelector.value = true;
         };
 
-        const selectQuickModels = (models) => {
-            const previousModel = settings.model;
-            const [qualityModel, balancedModel, fastModel] = models;
-            settings.qualityModel = qualityModel || '';
-            settings.balancedModel = balancedModel || '';
-            settings.fastModel = fastModel || '';
-            const activeSlot = chatModelSlots.value.find(slot => slot.mode === currentModelMode.value && slot.model)
-                || chatModelSlots.value.find(slot => slot.model);
-            if (activeSlot) {
-                currentModelMode.value = activeSlot.mode;
-                settings.model = activeSlot.model;
-            } else {
-                settings.model = previousModel;
-            }
+        const selectQuickModels = (models, index) => {
+            const mode = ['quality', 'balanced', 'fast'][index];
+            if (!mode) return;
+            syncCurrentApiKeyToProvider();
+            if (!settings.chatModelBindings || typeof settings.chatModelBindings !== 'object') settings.chatModelBindings = {};
+            window.RPHubApiUtils.bindChatModel(settings, mode, models[index] || '');
+            settings.model = settings[`${currentModelMode.value}Model`] || '';
         };
 
         const selectModel = (modelId) => {
@@ -3434,6 +3437,12 @@ const app = createApp({
             }
 
             settings[modelSelectionTarget.value] = modelId;
+            const slotMode = ['quality', 'balanced', 'fast'].find(mode => `${mode}Model` === modelSelectionTarget.value);
+            if (slotMode) {
+                syncCurrentApiKeyToProvider();
+                if (!settings.chatModelBindings || typeof settings.chatModelBindings !== 'object') settings.chatModelBindings = {};
+                window.RPHubApiUtils.bindChatModel(settings, slotMode, modelId);
+            }
 
             if (
                 (modelSelectionTarget.value === 'qualityModel' && currentModelMode.value === 'quality') ||
@@ -3682,6 +3691,9 @@ const app = createApp({
 
         const sendMessage = async () => {
             if ((!userInput.value.trim() && pendingChatImages.value.length === 0 && !pendingCardInteraction.value) || isConversationBusy.value || isRecognizingImages.value) return;
+            let chatConnection;
+            try { chatConnection = getChatModelConnection(); }
+            catch (error) { showToast(error.message, 'error'); return; }
             if (pendingChatImages.value.some(image => image.status !== 'ready')) {
                 showToast('请先移除识别失败的图片', 'warning');
                 return;
@@ -3722,7 +3734,7 @@ const app = createApp({
             await nextTick();
 
             // Single player
-            await generateResponse(startTime);
+            await generateResponse(startTime, { chatConnection });
         };
 
         const scrollChatToBottom = async () => {
@@ -4218,6 +4230,9 @@ const app = createApp({
 
         const regenerateMessage = async (index) => {
             if (isGenerating.value) return;
+            let chatConnection;
+            try { chatConnection = getChatModelConnection(); }
+            catch (error) { showToast(error.message, 'error'); return; }
 
             const startTime = Date.now(); // Record click time
             const startRegenerationStatus = () => {
@@ -4239,7 +4254,7 @@ const app = createApp({
                 const currentTurn = snapshot.turns.length;
                 removeClassicMemoriesFromTurn(currentTurn);
                 await Promise.all([saveClassicMemoriesNow(), saveMemorySettingsNow()]);
-                await generateResponse(startTime, { reuseGeneratingState: true });
+                await generateResponse(startTime, { reuseGeneratingState: true, chatConnection });
             } else {
                 // 如果是 AI 消息，删除它（及之后）然后重新生成
                 confirmAction('确定要重新生成这条消息吗？该楼层的记忆将被清除。', async () => {
@@ -4261,7 +4276,7 @@ const app = createApp({
                     removeOrphanedUiTemplateCorrections();
                     await saveConversationMutationNow({ saveTemplateRuntime: uiCleanup.logs > 0 || uiCleanup.blocks > 0 });
                     await saveMemorySettingsNow();
-                    await generateResponse(startTime, { reuseGeneratingState: true });
+                    await generateResponse(startTime, { reuseGeneratingState: true, chatConnection });
                 });
             }
         };
@@ -4370,7 +4385,14 @@ const app = createApp({
             const activeToolDepth = Number(options.activeToolDepth) || 0;
             const continueAssistantMessageId = options.continueAssistantMessageId || null;
             const continuationToolCallId = options.continuationToolCallId || null;
-            const requestModel = settings.model;
+            let chatConnection;
+            try {
+                chatConnection = options.chatConnection || getChatModelConnection();
+            } catch (error) {
+                showToast(error.message, 'error');
+                return;
+            }
+            const requestModel = chatConnection.model;
             const requestTools = activeToolDepth < ACTIVE_TOOL_MAX_AUTO_CONTINUE ? getEnabledActiveTools() : [];
 
             if (!currentCharacter.value) {
@@ -4853,6 +4875,7 @@ const app = createApp({
                     ...(extra_content ? { extra_content } : {})
                 }));
                 const responseResult = await requestTrackedChatCompletion({
+                    ...chatConnection,
                     model: requestModel,
                     messages: apiMessages,
                     logResponse: true,
@@ -4995,7 +5018,7 @@ const app = createApp({
 
                 wasCancelled ||= requestSignal.aborted;
                 const activeToolContinued = !wasCancelled && !generationFailed && toolResponse
-                    ? await handleActiveToolCallFromAssistant(assistantMessage, toolResponse, requestToolUis, requestTools, activeToolDepth)
+                    ? await handleActiveToolCallFromAssistant(assistantMessage, toolResponse, requestToolUis, requestTools, activeToolDepth, chatConnection)
                     : false;
                 if (!activeToolContinued) {
                     resetActiveToolResultContext();
@@ -6087,7 +6110,7 @@ const app = createApp({
             return steps;
         };
 
-        const handleActiveToolCallFromAssistant = async (assistantMessage, response, requestUis, requestTools, activeToolDepth) => {
+        const handleActiveToolCallFromAssistant = async (assistantMessage, response, requestUis, requestTools, activeToolDepth, chatConnection) => {
             const toolAbort = new AbortController();
             activeToolQueueAbortController = toolAbort;
             activeToolQueueRunning.value = true;
@@ -6143,6 +6166,7 @@ const app = createApp({
                 await saveChatHistoryNow();
                 if (toolAbort.signal.aborted) throw createAbortReason();
                 await generateResponse(Date.now(), {
+                    chatConnection,
                     activeToolDepth: activeToolDepth + 1,
                     continueAssistantMessageId: assistantMessage.id,
                     continuationToolCallId: continuationToolUi.id
@@ -8117,7 +8141,7 @@ const app = createApp({
             clearTimeout(mobileKeyboardBlurTimer);
         });
         // 解析并截断生成的包含 HTML UI 的正文，避免闪屏问题
-        const processMainContent = (mainText, isGeneratingState) => {
+        const computeMainContent = (mainText, isGeneratingState) => {
             mainText = stripUiTemplateUpdateBlock(mainText);
             if (!isGeneratingState) return { text: mainText, showSpinner: false };
             const imageStart = cardUtils.findLastUnprotectedMatch(mainText, /image###/gi)?.index ?? -1;
@@ -8162,6 +8186,33 @@ const app = createApp({
                 }
             }
             return pendingStart < 0 ? { text: mainText, showSpinner: false } : waitForUi(pendingStart);
+        };
+        // Pure dependencies: text and generation state; both helpers above read no reactive settings.
+        // Keep only the latest streaming prefix, plus bounded completed-message results.
+        let latestStreamingContent = null;
+        const mainContentCache = new Map();
+        let mainContentCacheCharacters = 0;
+        const processMainContent = (mainText, isGeneratingState) => {
+            if (isGeneratingState) {
+                if (latestStreamingContent?.text === mainText) return latestStreamingContent.result;
+                const result = computeMainContent(mainText, true);
+                latestStreamingContent = { text: mainText, result };
+                return result;
+            }
+            if (latestStreamingContent?.text === mainText) latestStreamingContent = null;
+            if (mainContentCache.has(mainText)) return mainContentCache.get(mainText);
+            const result = computeMainContent(mainText, false);
+            const characters = mainText.length + result.text.length;
+            if (characters <= 262144) {
+                mainContentCache.set(mainText, result);
+                mainContentCacheCharacters += characters;
+                while (mainContentCache.size > 16 || mainContentCacheCharacters > 262144) {
+                    const oldest = mainContentCache.keys().next().value;
+                    mainContentCacheCharacters -= oldest.length + mainContentCache.get(oldest).text.length;
+                    mainContentCache.delete(oldest);
+                }
+            }
+            return result;
         };
 
         const switchProfile = (id) => {
