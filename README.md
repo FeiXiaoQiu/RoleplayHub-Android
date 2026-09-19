@@ -1,4 +1,10 @@
-# Roleplay Hub
+<p align="center">
+  <img src="android-app/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="112" height="112" alt="Roleplay Hub 秘境来信图标">
+</p>
+
+<h1 align="center">Roleplay Hub</h1>
+
+<p align="center">每一次对话，都通往一个新故事。</p>
 
 [![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D.svg?logo=vue.js)](https://vuejs.org/)

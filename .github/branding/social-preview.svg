@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Roleplay Hub: Your next story starts here">
+  <rect width="1280" height="640" fill="#251d37"/>
+  <circle cx="1110" cy="70" r="280" fill="none" stroke="#dac3f7" stroke-opacity=".08" stroke-width="80"/>
+  <circle cx="1240" cy="620" r="250" fill="none" stroke="#dac3f7" stroke-opacity=".08" stroke-width="2"/>
+  <g transform="translate(80 145) scale(1.3)">
+    <path d="M62 177V98Q62 62 98 62H158Q194 62 194 98V147Q194 183 158 183H105L71 204L78 177Z" fill="#dac3f7"/>
+    <path d="M94 153V111A34 34 0 0 1 162 111V153Z" fill="#251d37"/>
+    <path d="M111 153V113Q111 93 131 92V153Z" fill="#9470bb"/>
+    <path d="M153 67L158 79L170 84L158 89L153 101L148 89L136 84L148 79Z" fill="#fff4d5"/>
+  </g>
+  <g font-family="DejaVu Sans, sans-serif">
+    <text x="435" y="236" fill="#b29dcf" font-size="17" letter-spacing="5">A DOOR TO YOUR IMAGINATION</text>
+    <text x="430" y="326" fill="#fff4e5" font-size="76" font-weight="bold" letter-spacing="-3">Roleplay Hub</text>
+    <text x="435" y="384" fill="#dac3f7" font-size="25">Your next story starts here.</text>
+    <text x="435" y="458" fill="#b29dcf" font-size="16" letter-spacing="2">CHARACTERS / CONVERSATIONS / STORIES</text>
+  </g>
+  <path d="M90 556H1190" stroke="#dac3f7" stroke-opacity=".2"/>
+  <text x="90" y="590" fill="#b29dcf" font-family="DejaVu Sans, sans-serif" font-size="14" letter-spacing="2">ROLEPLAY HUB / ANDROID</text>
+</svg>
