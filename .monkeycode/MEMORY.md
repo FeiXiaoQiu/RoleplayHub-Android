@@ -33,9 +33,9 @@ Entries discovered by the Agent during task execution should follow this format:
 
 [提交确认偏好]
 - Date: 2026-09-19
-- Context: 用户要求直接提交更改，下次无需询问
+- Context: 用户要求合并后直接提交、推送并发布，下次无需询问
 - Instructions:
-  - 完成更改并检查后直接提交相关文件，无需重复征求提交确认；推送与发布按用户明确授权范围执行。
+  - 合并完成并检查后，直接提交相关文件、推送远程并发布版本，跟进发布结果，无需重复征求确认。
 
 [版本递进要求]
 - Date: 2026-09-19
