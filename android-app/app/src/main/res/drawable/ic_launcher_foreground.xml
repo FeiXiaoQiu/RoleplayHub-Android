@@ -4,7 +4,16 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#8B8BD6"
-        android:pathData="M54,28 L84,60 L54,80 L24,60 Z" />
+    <!-- Center the 256-unit artwork inside the 66dp circular safe zone. -->
+    <group android:scaleX="0.32" android:scaleY="0.32"
+        android:translateX="13.04" android:translateY="13.04">
+        <path android:fillColor="#dac3f7"
+            android:pathData="M62 177V98Q62 62 98 62H158Q194 62 194 98V147Q194 183 158 183H105L71 204L78 177Z" />
+        <path android:fillColor="#251d37"
+            android:pathData="M94 153V111A34 34 0 0 1 162 111V153Z" />
+        <path android:fillColor="#9470bb"
+            android:pathData="M111 153V113Q111 93 131 92V153Z" />
+        <path android:fillColor="#fff4d5"
+            android:pathData="M153 67L158 79L170 84L158 89L153 101L148 89L136 84L148 79Z" />
+    </group>
 </vector>

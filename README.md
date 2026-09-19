@@ -12,6 +12,15 @@
 
 ---
 
+## Android 更新记录
+
+### 2.0.0-rc-13（versionCode 212） · 2026-09-19
+
+- 桌面图标采用 5 号「秘境来信」，使用墨紫背景、丁香白对话框、门与星光。
+- 更新 mdpi、hdpi、xhdpi、xxhdpi、xxxhdpi 的标准、圆形与 adaptive 前景 PNG；adaptive 前景保留 66dp 圆形安全区。
+- 补充 Android 圆形图标声明；沿用 rc-12 的功能与上游 1.9.6 Preview 基线。相同签名下支持覆盖升级，保留应用数据。
+- 发布说明同时维护于 `.github/workflows/release.yml`。
+
 ## 核心特性 (Features)
 
 Roleplay Hub 致力于提供流畅、私密且功能强大的本地化AI Roleplay体验。
