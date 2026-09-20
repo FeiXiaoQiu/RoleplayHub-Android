@@ -7304,6 +7304,11 @@ const app = createApp({
             const isLatestSwitch = () => switchEpoch === _characterSwitchEpoch;
             switchingCharacterIndex.value = index;
             try {
+            // Let the loading state paint before storage cloning and scoped-data work.
+            if (!silent && document.visibilityState === 'visible') {
+                await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+                if (!isLatestSwitch()) return;
+            }
             await _characterSwitchSavePromise;
             if (!isLatestSwitch()) return;
 

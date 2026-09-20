@@ -325,6 +325,7 @@
             const panel = ref(null);
             const position = ref({});
             const centered = ref(false);
+            const transitionDuration = ref({ enter: 380, leave: 250 });
             let returnFocus = null;
             const sections = [
                 { label: '常用', items: [...primaryItems, { view: 'settings', label: '设置' }] },
@@ -336,6 +337,9 @@
                 emit('close');
             };
             watch(() => props.open, async open => {
+                const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                const mobile = window.matchMedia('(max-width: 768px)').matches;
+                transitionDuration.value = reduced ? 0 : mobile ? { enter: 220, leave: 180 } : { enter: 380, leave: 250 };
                 if (!open) return;
                 returnFocus = document.activeElement;
                 centered.value = onlineItems.some(item => item.view === props.currentView);
@@ -368,10 +372,10 @@
                     first?.focus();
                 }
             };
-            return { panel, position, centered, sections, selectView, restoreFocus, trapFocus };
+            return { panel, position, centered, sections, selectView, restoreFocus, trapFocus, transitionDuration };
         },
         template: `
-            <transition name="app-navigation" :duration="{ enter: 380, leave: 250 }" @after-leave="restoreFocus">
+            <transition name="app-navigation" :duration="transitionDuration" @after-leave="restoreFocus">
                 <div v-if="open" class="app-navigation-layer" @click.self="$emit('close')"
                     :class="{ 'app-navigation-layer--centered': centered }"
                     @keydown.esc.stop.prevent="$emit('close')" @keydown="trapFocus">
@@ -556,7 +560,7 @@
         },
         emits: ['close'],
         template: `
-            <div :class="['fixed inset-0 flex items-center justify-center', overlayClass]"
+            <div :class="['modal-shell fixed inset-0 flex items-center justify-center', overlayClass]"
                 @click.self="closeOnBackdrop && $emit('close')">
                 <div :class="panelClass"><slot></slot></div>
             </div>`
