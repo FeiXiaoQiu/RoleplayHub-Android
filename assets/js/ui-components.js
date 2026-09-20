@@ -314,7 +314,7 @@
     const AppNavigation = {
         props: {
             currentView: { type: String, required: true },
-            open: Boolean,
+            state: { type: Object, required: true },
             memoryProcessing: Boolean,
             uiTemplateRunning: Boolean,
             user: { type: Object, required: true }
@@ -325,6 +325,7 @@
             const panel = ref(null);
             const position = ref({});
             const centered = ref(false);
+            const open = computed(() => props.state.open.value);
             const transitionDuration = ref({ enter: 380, leave: 250 });
             let returnFocus = null;
             const sections = [
@@ -336,15 +337,16 @@
                 emit('update:current-view', view);
                 emit('close');
             };
-            watch(() => props.open, async open => {
+            watch(open, async isOpen => {
                 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                const mobile = window.matchMedia('(max-width: 768px)').matches;
-                transitionDuration.value = reduced ? 0 : mobile ? { enter: 220, leave: 180 } : { enter: 380, leave: 250 };
-                if (!open) return;
+                transitionDuration.value = reduced ? 0 : { enter: 380, leave: 250 };
+                const main = document.querySelector('.app-main');
+                if (main) main.inert = isOpen;
+                if (!isOpen) return;
                 returnFocus = document.activeElement;
                 centered.value = onlineItems.some(item => item.view === props.currentView);
                 await nextTick();
-                if (!props.open || !panel.value) return;
+                if (!open.value || !panel.value) return;
                 const anchor = returnFocus?.getBoundingClientRect();
                 position.value = centered.value ? {} : {
                     left: Math.max(12, Math.min(anchor?.left || 12, window.innerWidth - panel.value.offsetWidth - 12)) + 'px',
@@ -353,7 +355,7 @@
                 (panel.value.querySelector('[aria-current="page"]') || panel.value).focus({ preventScroll: true });
             });
             const restoreFocus = () => {
-                if (props.open) return;
+                if (open.value) return;
                 const target = returnFocus?.isConnected && returnFocus.getClientRects().length
                     ? returnFocus
                     : [...document.querySelectorAll('.app-nav-trigger')].find(button => button.getClientRects().length);
@@ -372,7 +374,8 @@
                     first?.focus();
                 }
             };
-            return { panel, position, centered, sections, selectView, restoreFocus, trapFocus, transitionDuration };
+            onBeforeUnmount(() => { const main = document.querySelector('.app-main'); if (main) main.inert = false; });
+            return { open, panel, position, centered, sections, selectView, restoreFocus, trapFocus, transitionDuration };
         },
         template: `
             <transition name="app-navigation" :duration="transitionDuration" @after-leave="restoreFocus">
@@ -2525,18 +2528,23 @@
                 if (props.items.some(item => item.char.uuid === id)) focusedId.value = id;
             });
             // 最多渲染中间与左右各两张，收藏排序或筛选改变时仍跟随同一个角色。
-            const visibleItems = computed(() => {
+            const leftCount = computed(() => Math.min(2, Math.floor((props.items.length - (dragOffset.value > 0 ? 0 : 1)) / 2)));
+            // Counts depend on card data and window membership, never pointer position.
+            const windowItems = computed(() => {
                 const count = props.items.length;
                 const result = [];
-                const leftCount = Math.min(2, Math.floor((count - (dragOffset.value > 0 ? 0 : 1)) / 2));
-                for (let offset = -leftCount; offset <= Math.min(2, count - leftCount - 1); offset++) {
+                for (let offset = -leftCount.value; offset <= Math.min(2, count - leftCount.value - 1); offset++) {
                     if (!count) break;
                     const index = (focusedIndex.value + offset + count) % count;
-                    const position = offset + dragOffset.value;
-                    result.push({ ...props.items[index], offset, position, depth: Math.abs(position) });
+                    const item = props.items[index];
+                    result.push({ ...item, offset, worldInfoCount: props.worldInfoCount(item.char), regexCount: props.regexCount(item.char) });
                 }
                 return result;
             });
+            const visibleItems = computed(() => windowItems.value.map(item => {
+                const position = item.offset + dragOffset.value;
+                return { ...item, position, depth: Math.abs(position) };
+            }));
             const move = direction => {
                 if (busy.value || props.items.length < 2) return;
                 opening.value = false;
@@ -2662,7 +2670,7 @@
                             :style="{ '--deck-offset': item.position, '--deck-depth': item.depth, zIndex: 100 - Math.round(item.depth * 10) }">
                             <character-card :char="item.char" mobile deck :active="activeId === item.char.uuid"
                                 :loading="loadingIndex === item.originalIndex" :favorite="Number(item.char.favoriteAt) > 0"
-                                :world-info-count="worldInfoCount(item.char)" :regex-count="regexCount(item.char)"
+                                :world-info-count="item.worldInfoCount" :regex-count="item.regexCount"
                                 :inert="item.offset !== 0" :aria-hidden="item.offset !== 0"
                                 @edit="$emit('edit', item.originalIndex)" @export-card="$emit('export-card', item.originalIndex)"
                                 @toggle-favorite="$emit('toggle-favorite', item.originalIndex)" @delete-card="$emit('delete-card', item.originalIndex)">

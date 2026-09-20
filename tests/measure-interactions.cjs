@@ -55,10 +55,9 @@ const assert = require('node:assert/strict');
    assert.equal(result.back,true);
    if(process.argv.includes('--verify')) {
     assert.equal(result.hiddenDecks,0);
-    if(width===390) { assert.equal(result.blur,'none'); assert.equal(result.deck.filter,'none'); }
-    else assert(result.blur.includes('24px'));
-    assert(!result.deck.transition.includes('filter'));
-    assert(!result.modalStyle.transition.includes('all'));
+     assert(result.blur.includes(width===390 ? '16px' : '24px'));
+     assert(result.deck.filter.includes('blur'));
+     assert(result.deck.transition.includes('filter'));
     if(reducedMotion==='reduce') assert(result.closeMs<150);
    }
    console.log(JSON.stringify({width,reducedMotion,...result}));

@@ -527,14 +527,8 @@
         .app-navigation-enter-from .app-navigation-panel, .app-navigation-leave-to .app-navigation-panel { opacity: 0; transform: translateY(-8px) scale(0.94); }
 
         @media (max-width: 768px) {
-            .app-nav-trigger--embedded, .app-navigation-panel {
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-                background: linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(235, 242, 252, 0.96));
-            }
+            .app-nav-trigger--embedded, .app-navigation-panel { --navigation-blur: 16px; }
             .app-navigation-panel { border-radius: 24px; }
-            .app-navigation-enter-active .app-navigation-panel { transition-duration: 0.22s; }
-            .app-navigation-leave-active::before { transition-duration: 0.18s; }
         }
         @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
             .app-nav-trigger--embedded, .app-navigation-panel { background: rgba(248, 250, 253, 0.98); }
@@ -2162,12 +2156,8 @@
 
 
         .glass-stabilize {
+            will-change: backdrop-filter, transform, opacity;
             -webkit-font-smoothing: subpixel-antialiased;
-        }
-
-        /* Keep modal geometry and shadows out of generic transition-all utilities. */
-        .modal-shell > div {
-            transition-property: transform, opacity;
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -2402,7 +2392,8 @@ opacity: 0;
             opacity: calc(1 - var(--deck-depth) * 0.18);
             filter: blur(calc(var(--deck-depth) * 1.6px)) saturate(calc(1 - var(--deck-depth) * 0.12));
             /* 层级立即跟随选中卡片，不能参与渐变，否则退到侧面的卡片会短暂盖住主卡。 */
-            transition: transform 0.7s var(--deck-easing), opacity 0.7s var(--deck-easing);
+            transition: transform 0.7s var(--deck-easing), opacity 0.7s var(--deck-easing), filter 0.7s var(--deck-easing);
+            will-change: transform, opacity, filter;
         }
 
         .character-deck--opening .character-deck__item { animation: character-deck-open 0.75s var(--deck-easing) both; }
@@ -2422,7 +2413,7 @@ opacity: 0;
             border: 0;
             background: #1e293b;
             box-shadow: 0 18px 38px -16px rgba(15, 23, 42, 0.45);
-            transition: none;
+            transition: box-shadow 0.7s var(--deck-easing);
         }
 
         .is-focused > .character-card--deck { box-shadow: 0 24px 48px -20px rgba(15, 23, 42, 0.5); }
@@ -2469,10 +2460,7 @@ opacity: 0;
         @media (max-width: 767px) {
             .character-deck { --deck-card-width: min(84cqw, 380px, max(220px, calc((100dvh - 250px) / 1.5))); --deck-spread: 44%; }
             .character-deck__stage { margin-inline: -1rem; }
-            .character-deck__backdrop img { filter: blur(12px) saturate(1.05); }
-            .character-deck__item { filter: none; transition-duration: 0.32s; }
-            .character-deck--opening .character-deck__item { animation-duration: 0.32s; }
-            .character-backdrop-enter-active, .character-backdrop-leave-active { transition-duration: 0.32s; }
+            .character-deck__backdrop img { filter: blur(25px) saturate(1.05); }
             .character-deck__navigation { gap: 16px; max-width: 340px; margin-top: 12px; }
             .character-card--deck > .absolute.bottom-0 { padding: 18px 14px; }
         }

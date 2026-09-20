@@ -253,6 +253,8 @@ const app = createApp({
 
         const currentView = ref('chat');
         const isNavigationOpen = ref(false);
+        // Pass the ref without reading it in the large root render function.
+        const navigationState = Object.freeze({ open: isNavigationOpen });
         const showDescriptionPanel = ref(false);
         const showModelSelector = ref(false);
         const modelSelectionTarget = ref('model');
@@ -8517,7 +8519,7 @@ const app = createApp({
                 await saveMemoriesNow();
                 showToast(`成功导入 ${normalized.length} 个分片`, 'success');
             }, error => showToast(`导入失败: ${error.message || 'JSON 格式错误'}`, 'error')),
-            toggleNavigation, closeNavigation,
+            toggleNavigation, closeNavigation, navigationState,
             fetchModels, selectModel, selectQuickModels, sendMessage, autoResizeInput, handleChatInputFocus, handleChatInputBlur, handleChatInputKeydown, stopGeneration, clearChat, toggleChatFullscreen,
             handleConfirm, handleCancel, // Export handlers
             copyMessage, playMessageActionFeedback, canDeleteMessage, deleteMessage, regenerateMessage,
