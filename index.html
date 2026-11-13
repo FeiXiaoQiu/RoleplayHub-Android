@@ -99,7 +99,7 @@
         </div>
 
 
-        <app-navigation :current-view="currentView" :state="navigationState"
+        <app-navigation :current-view="currentView" :open="isNavigationOpen"
             :memory-processing="isAnyMemoryProcessing"
             :ui-template-running="uiTemplateUpdateStatus.state === 'running'" :user="user"
             @update:current-view="currentView = $event"
