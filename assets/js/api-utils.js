@@ -8,6 +8,23 @@
         return `${apiRoot}/${String(path || '').replace(/^\/+/, '')}`;
     };
 
+    const buildUserInputToolMessages = (text, callId) => [
+        {
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+                id: callId,
+                type: 'function',
+                function: { name: 'read_user_input', arguments: '{}' }
+            }]
+        },
+        {
+            role: 'tool',
+            tool_call_id: callId,
+            content: JSON.stringify({ source: 'user_input', text })
+        }
+    ];
+
     const parsePayload = (text, status) => {
         const data = JSON.parse(text);
         const error = extractApiErrorMessage(data, status);
@@ -68,7 +85,7 @@
         let timedOut = false;
         const touch = () => {
             clearTimeout(timer);
-            timer = setTimeout(() => { timedOut = true; controller.abort(); }, options.timeoutMs ?? 120000);
+            timer = setTimeout(() => { timedOut = true; controller.abort(); }, 120000);
         };
         if (options.signal?.aborted) abort();
         else options.signal?.addEventListener('abort', abort, { once: true });
@@ -237,7 +254,7 @@
             const choice = data.choices?.[0] || {};
             const message = choice.delta || choice.message || {};
             let content = readTextContent(message.content ?? choice.text);
-            const reasoning = extractNativeReasoning(message) || extractNativeReasoning(choice) || '';
+            const reasoning = extractNativeReasoning(message) || extractNativeReasoning(choice);
             plainContent += content;
             refusal += readTextContent(message.refusal);
             // 保留转接接口返回的签名和推理字段，原样用于本轮工具结果回传，不混进聊天正文。
@@ -273,6 +290,7 @@
             pendingReasoning += reasoning;
         };
         try {
+            options.onBeforeRequest?.();
             const tools = [...(options.tools || []), ...(options.replyInTool && !options.requireTool ? [replyTool] : [])];
             return await withApiResponse({ ...options, onErrorResponse: text => {
                 if (logResponse) rawResponse = text;
@@ -423,6 +441,12 @@
         }
         return { model, apiUrl, apiKey, url: buildApiEndpoint(apiUrl, 'chat/completions') };
     };
-    window.RPHubApiUtils = Object.freeze({ buildApiEndpoint, bindChatModel, migrateChatModelBindings, resolveChatModel });
+    window.RPHubApiUtils = Object.freeze({
+        buildApiEndpoint,
+        buildUserInputToolMessages,
+        bindChatModel,
+        migrateChatModelBindings,
+        resolveChatModel
+    });
     window.RPHubApiClient = Object.freeze({ requestChatCompletion, requestJson });
 })();

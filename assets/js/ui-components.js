@@ -5,17 +5,6 @@
     const { ref, computed, nextTick, watch, onBeforeUnmount } = Vue;
 
     const toOption = (option, index) => {
-        if (!option || typeof option !== 'object') {
-            return {
-                value: option,
-                label: String(option ?? ''),
-                description: '',
-                disabled: false,
-                group: '',
-                key: `${index}:${String(option ?? '')}`
-            };
-        }
-
         const value = option.value;
         return {
             value,
@@ -38,14 +27,6 @@
                 type: Array,
                 default: () => []
             },
-            placeholder: {
-                type: String,
-                default: '请选择'
-            },
-            disabled: {
-                type: Boolean,
-                default: false
-            },
             buttonClass: {
                 type: [String, Array, Object],
                 default: ''
@@ -53,13 +34,9 @@
             menuClass: {
                 type: [String, Array, Object],
                 default: ''
-            },
-            optionClass: {
-                type: [String, Array, Object],
-                default: ''
             }
         },
-        emits: ['update:modelValue', 'change'],
+        emits: ['update:modelValue'],
         setup(props, { emit }) {
             const isOpen = ref(false);
             const triggerRef = ref(null);
@@ -75,12 +52,12 @@
             const selectedOption = computed(() => (
                 normalizedOptions.value.find(option => optionMatches(option.value, props.modelValue))
             ));
-            const selectedLabel = computed(() => selectedOption.value?.label || props.placeholder);
+            const selectedLabel = computed(() => selectedOption.value?.label || '请选择');
 
             const shouldShowGroup = (index) => {
                 const option = normalizedOptions.value[index];
-                if (!option?.group) return false;
-                return index === 0 || normalizedOptions.value[index - 1]?.group !== option.group;
+                if (!option.group) return false;
+                return index === 0 || normalizedOptions.value[index - 1].group !== option.group;
             };
 
             const updateMenuPosition = () => {
@@ -115,11 +92,8 @@
                 isOpen.value = false;
             };
 
-            const openMenu = async () => {
-                if (props.disabled) return;
+            const openMenu = () => {
                 isOpen.value = true;
-                await nextTick();
-                updateMenuPosition();
             };
 
             const toggleMenu = () => {
@@ -133,7 +107,6 @@
             const selectOption = (option) => {
                 if (!option || option.disabled) return;
                 emit('update:modelValue', option.value);
-                emit('change', option.value);
                 closeMenu();
             };
 
@@ -203,7 +176,6 @@
                 <button
                     ref="triggerRef"
                     type="button"
-                    :disabled="disabled"
                     :aria-expanded="isOpen ? 'true' : 'false'"
                     aria-haspopup="listbox"
                     :class="[
@@ -260,8 +232,7 @@
                                     :class="[
                                         'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
                                         option.disabled ? 'cursor-not-allowed text-gray-300' : 'text-gray-700 hover:bg-primary-50 hover:text-primary-700',
-                                        isSelected(option) && !option.disabled ? 'bg-primary-50 text-primary-700 font-bold' : '',
-                                        optionClass
+                                        isSelected(option) && !option.disabled ? 'bg-primary-50 text-primary-700 font-bold' : ''
                                     ]"
                                     @click="selectOption(option)"
                                 >
@@ -307,46 +278,49 @@
     const advancedItems = Object.freeze([
         { view: 'presets', label: '预设', icon: 'M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4M6 18a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4' },
         { view: 'worldinfo', label: '世界书', icon: 'M12 6.25v13m0-13C10.83 5.48 9.25 5 7.5 5S4.17 5.48 3 6.25v13C4.17 18.48 5.75 18 7.5 18s3.33.48 4.5 1.25m0-13C13.17 5.48 14.75 5 16.5 5S19.83 5.48 21 6.25v13C19.83 18.48 18.25 18 16.5 18s-3.33.48-4.5 1.25' },
-        { view: 'regex', label: '正则', title: '正则脚本', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' },
+        { view: 'regex', label: '正则', icon: 'M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4' },
         { view: 'tools', label: '工具', icon: 'M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94L14.7 6.3z' }
     ]);
 
     const AppNavigation = {
         props: {
             currentView: { type: String, required: true },
-            state: { type: Object, required: true },
+            open: Boolean,
             memoryProcessing: Boolean,
             uiTemplateRunning: Boolean,
             user: { type: Object, required: true }
         },
         emits: ['update:current-view', 'close'],
         setup(props, { emit }) {
-            const { ref, watch, nextTick } = Vue;
+            const { ref, watch, nextTick, onMounted, onBeforeUnmount } = Vue;
+            const isDark = ref(window.RPHubTheme.current === 'dark');
+            const syncTheme = event => { isDark.value = event.detail === 'dark'; };
+            const toggleTheme = () => window.RPHubTheme.set(isDark.value ? 'light' : 'dark');
+            onMounted(() => window.addEventListener('rphub-theme-change', syncTheme));
+            onBeforeUnmount(() => window.removeEventListener('rphub-theme-change', syncTheme));
             const panel = ref(null);
             const position = ref({});
             const centered = ref(false);
-            const open = computed(() => props.state.open.value);
-            const transitionDuration = ref({ enter: 380, leave: 250 });
             let returnFocus = null;
             const sections = [
                 { label: '常用', items: [...primaryItems, { view: 'settings', label: '设置' }] },
                 { label: '在线', items: onlineItems },
                 { label: '高级', items: advancedItems }
             ];
+            // Running index for the opening cascade (--i in CSS).
+            let order = 0;
+            sections.forEach(section => { section.offset = order; order += section.items.length + 1; });
+            const footerOrder = order;
             const selectView = view => {
                 emit('update:current-view', view);
                 emit('close');
             };
-            watch(open, async isOpen => {
-                const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-                transitionDuration.value = reduced ? 0 : { enter: 380, leave: 250 };
-                const main = document.querySelector('.app-main');
-                if (main) main.inert = isOpen;
-                if (!isOpen) return;
+            watch(() => props.open, async open => {
+                if (!open) return;
                 returnFocus = document.activeElement;
                 centered.value = onlineItems.some(item => item.view === props.currentView);
                 await nextTick();
-                if (!open.value || !panel.value) return;
+                if (!props.open || !panel.value) return;
                 const anchor = returnFocus?.getBoundingClientRect();
                 position.value = centered.value ? {} : {
                     left: Math.max(12, Math.min(anchor?.left || 12, window.innerWidth - panel.value.offsetWidth - 12)) + 'px',
@@ -355,7 +329,7 @@
                 (panel.value.querySelector('[aria-current="page"]') || panel.value).focus({ preventScroll: true });
             });
             const restoreFocus = () => {
-                if (open.value) return;
+                if (props.open) return;
                 const target = returnFocus?.isConnected && returnFocus.getClientRects().length
                     ? returnFocus
                     : [...document.querySelectorAll('.app-nav-trigger')].find(button => button.getClientRects().length);
@@ -374,11 +348,10 @@
                     first?.focus();
                 }
             };
-            onBeforeUnmount(() => { const main = document.querySelector('.app-main'); if (main) main.inert = false; });
-            return { open, panel, position, centered, sections, selectView, restoreFocus, trapFocus, transitionDuration };
+            return { panel, position, centered, sections, footerOrder, selectView, restoreFocus, trapFocus, isDark, toggleTheme };
         },
         template: `
-            <transition name="app-navigation" :duration="transitionDuration" @after-leave="restoreFocus">
+            <transition name="app-navigation" :duration="{ enter: 560, leave: 250 }" @after-leave="restoreFocus">
                 <div v-if="open" class="app-navigation-layer" @click.self="$emit('close')"
                     :class="{ 'app-navigation-layer--centered': centered }"
                     @keydown.esc.stop.prevent="$emit('close')" @keydown="trapFocus">
@@ -396,10 +369,11 @@
                         </header>
                         <nav class="app-navigation-content custom-scrollbar" aria-label="页面">
                             <section v-for="section in sections" :key="section.label" class="app-navigation-section">
-                                <h3>{{ section.label }}</h3>
+                                <h3 :style="{ '--i': section.offset }">{{ section.label }}</h3>
                                 <div class="app-navigation-grid" :class="{ 'app-navigation-grid--online': section.label === '在线' }">
-                                    <button v-for="item in section.items" :key="item.view" type="button"
+                                    <button v-for="(item, itemIndex) in section.items" :key="item.view" type="button"
                                         class="app-navigation-item" :class="{ 'is-current': item.view === currentView }"
+                                        :style="{ '--i': section.offset + itemIndex + 1 }"
                                         :aria-current="item.view === currentView ? 'page' : null"
                                         @click="selectView(item.view)">
                                         <span class="app-navigation-icon">
@@ -421,11 +395,20 @@
                                 </div>
                             </section>
                         </nav>
-                        <footer class="app-navigation-user">
+                        <footer class="app-navigation-user" :style="{ '--i': footerOrder }">
                             <img v-if="user.avatar" :src="user.avatar" alt="">
                             <span v-else class="app-navigation-avatar">{{ (user.name || 'U').charAt(0).toUpperCase() }}</span>
                             <div><strong>{{ user.name }}</strong></div>
-                            <span class="app-navigation-user-mark" aria-hidden="true"></span>
+                            <button type="button" class="appearance-switch" role="switch" :aria-checked="isDark"
+                                aria-label="夜间模式" :title="isDark ? '切换到日间模式' : '切换到夜间模式'" @click="toggleTheme">
+                                <svg v-if="!isDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                    <path d="M20.5 13.1A8.5 8.5 0 0110.9 3.5 8.5 8.5 0 1020.5 13.1Z" stroke-linecap="round" stroke-linejoin="round"></path>
+                                </svg>
+                                <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                                    <circle cx="12" cy="12" r="3.5"></circle>
+                                    <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"></path>
+                                </svg>
+                            </button>
                         </footer>
                     </section>
                 </div>
@@ -491,21 +474,59 @@
     const GenerationTimer = {
         props: {
             waitTime: Number,
-            estimatedTime: Number,
-            remoteEstimatedTime: Number,
-            remote: Boolean
+            estimatedTime: Number
         },
         template: `
-            <div class="flex items-center gap-1.5 text-[11px] text-gray-500 font-mono bg-white/50 backdrop-blur-sm px-2.5 py-1 rounded-full border border-white/50 animate-fade-in mt-1 shadow-sm typing-timer-badge">
+            <div class="typing-timer-badge flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full animate-fade-in mt-1 shadow-sm">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
                 <span class="whitespace-nowrap">
                     {{ waitTime }}s
-                    <span v-if="estimatedTime || remoteEstimatedTime" class="text-gray-300 mx-0.5">/</span>
-                    <span v-if="estimatedTime && !remote">{{ estimatedTime }}s</span>
-                    <span v-else-if="remoteEstimatedTime">{{ remoteEstimatedTime }}s</span>
+                    <span v-if="estimatedTime" class="text-gray-300 mx-0.5">/</span>
+                    <span v-if="estimatedTime">{{ estimatedTime }}s</span>
                 </span>
+            </div>`
+    };
+
+    // A key field, shown as dots. While it is in use, two buttons appear on its right: copy (a password field
+    // will not let the browser copy it) and show/hide. Leaving the field hides the key again.
+    const SecretInput = {
+        props: {
+            modelValue: { type: String, default: '' },
+            placeholder: { type: String, default: '' },
+            inputClass: { type: [String, Array, Object], default: '' }
+        },
+        emits: ['update:modelValue'],
+        data: () => ({ visible: false, copied: false }),
+        methods: {
+            copy() {
+                navigator.clipboard.writeText(this.modelValue).then(() => {
+                    this.copied = true;
+                    clearTimeout(this.copiedTimer);
+                    this.copiedTimer = setTimeout(() => { this.copied = false; }, 1500);
+                }).catch(() => {});
+            },
+            hideOnLeave(event) {
+                if (!this.$el.contains(event.relatedTarget)) this.visible = false;
+            }
+        },
+        template: `
+            <div class="secret-input" @focusout="hideOnLeave">
+                <input :value="modelValue" @input="$emit('update:modelValue', $event.target.value)"
+                    :type="visible ? 'text' : 'password'" :placeholder="placeholder" :class="inputClass" spellcheck="false">
+                <div class="secret-input__actions">
+                    <button type="button" @mousedown.prevent @click="copy" :disabled="!modelValue"
+                        :title="copied ? '已复制' : '复制'" :aria-label="copied ? '已复制' : '复制'">
+                        <svg v-if="copied" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                        <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2" stroke-width="2"></rect><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path></svg>
+                    </button>
+                    <button type="button" @mousedown.prevent @click="visible = !visible" :aria-pressed="visible"
+                        :title="visible ? '隐藏' : '显示'" :aria-label="visible ? '隐藏' : '显示'">
+                        <svg v-if="visible" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path></svg>
+                        <svg v-else fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    </button>
+                </div>
             </div>`
     };
 
@@ -530,43 +551,82 @@
             </div>`
     };
 
+    // Question-mark help. The popover is rendered on <body>, so no scrolling or clipped container can hide it,
+    // and is placed by its trigger: below it, or above when the screen runs out, kept inside the viewport.
     const SettingsHelp = {
         props: {
             topic: { type: String, required: true },
             openTopic: { type: String, default: '' },
             label: { type: String, required: true },
             triggerClass: { type: String, default: '' },
-            popoverClass: { type: String, default: '' },
             iconClass: { type: String, default: 'h-3.5 w-3.5' }
         },
         emits: ['toggle'],
+        setup(props) {
+            const trigger = ref(null);
+            const popover = ref(null);
+            const popoverStyle = ref({});
+            const isOpen = computed(() => props.openTopic === props.topic);
+            const place = () => {
+                const anchor = trigger.value?.getBoundingClientRect();
+                const box = popover.value;
+                if (!anchor || !box) return;
+                const margin = 8;
+                const below = anchor.bottom + 6 + box.offsetHeight <= window.innerHeight - margin;
+                popoverStyle.value = {
+                    left: Math.max(margin, Math.min(anchor.left, window.innerWidth - box.offsetWidth - margin)) + 'px',
+                    top: (below ? anchor.bottom + 6 : Math.max(margin, anchor.top - 6 - box.offsetHeight)) + 'px',
+                    transformOrigin: below ? 'top left' : 'bottom left'
+                };
+            };
+            const stopFollowing = () => {
+                window.removeEventListener('scroll', place, true);
+                window.removeEventListener('resize', place);
+            };
+            watch(isOpen, async (open) => {
+                stopFollowing();
+                if (!open) return;
+                await nextTick();
+                place();
+                window.addEventListener('scroll', place, true);
+                window.addEventListener('resize', place);
+            }, { immediate: true });
+            onBeforeUnmount(stopFollowing);
+            return { trigger, popover, popoverStyle, isOpen };
+        },
         template: `
-            <button type="button" @click.stop="$emit('toggle', openTopic === topic ? '' : topic)"
-                class="settings-help-trigger" :class="[triggerClass, { 'is-open': openTopic === topic }]"
-                :aria-expanded="openTopic === topic" :aria-label="label">
+            <button ref="trigger" type="button" @click.stop="$emit('toggle', isOpen ? '' : topic)"
+                class="settings-help-trigger" :class="[triggerClass, { 'is-open': isOpen }]"
+                :aria-expanded="isOpen" :aria-label="label">
                 <svg :class="iconClass" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                         d="M9.1 9a3 3 0 115.8 1.1c-.6 1.1-1.9 1.3-2.5 2.2-.3.4-.4.8-.4 1.2M12 17h.01"></path>
                 </svg>
             </button>
-            <div v-if="openTopic === topic" class="settings-help-popover" :class="popoverClass">
-                <span class="settings-help-popover-content"><slot></slot></span>
-            </div>`
+            <teleport to="body">
+                <div v-if="isOpen" ref="popover" class="settings-help-popover" :style="popoverStyle">
+                    <span class="settings-help-popover-content"><slot></slot></span>
+                </div>
+            </teleport>`
     };
 
+    // Owns the open/close animation for every modal: the overlay fades, the panel rises.
     const ModalShell = {
         inheritAttrs: false,
         props: {
+            show: Boolean,
             overlayClass: { type: [String, Array, Object], default: '' },
             panelClass: { type: [String, Array, Object], default: '' },
             closeOnBackdrop: Boolean
         },
         emits: ['close'],
         template: `
-            <div :class="['modal-shell fixed inset-0 flex items-center justify-center', overlayClass]"
-                @click.self="closeOnBackdrop && $emit('close')">
-                <div :class="panelClass"><slot></slot></div>
-            </div>`
+            <transition name="modal">
+                <div v-if="show" :class="['app-modal-overlay fixed inset-0 flex items-center justify-center', overlayClass]"
+                    @click.self="closeOnBackdrop && $emit('close')">
+                    <div class="app-modal-panel" :class="panelClass"><slot></slot></div>
+                </div>
+            </transition>`
     };
 
     const ModalHeader = {
@@ -580,6 +640,105 @@
                     </svg>
                 </button>
             </div>`
+    };
+
+    const MemoryBackfillModal = {
+        props: {
+            show: Boolean,
+            progress: { type: Object, required: true }
+        },
+        emits: ['close', 'stop', 'retry'],
+        setup(props, { emit }) {
+            const dialog = ref(null);
+            let previousFocus = null;
+            watch(() => props.show, async show => {
+                if (show) {
+                    previousFocus = document.activeElement;
+                    await nextTick();
+                    dialog.value?.focus();
+                } else if (previousFocus?.isConnected) previousFocus.focus();
+            });
+            const onKeydown = event => {
+                if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    emit('close');
+                } else if (event.key === 'Tab') {
+                    const buttons = [...dialog.value.querySelectorAll('button:not(:disabled)')];
+                    const first = buttons[0], last = buttons[buttons.length - 1];
+                    if (event.shiftKey && (event.target === first || event.target === dialog.value)) {
+                        event.preventDefault();
+                        last?.focus();
+                    } else if (!event.shiftKey && event.target === last) {
+                        event.preventDefault();
+                        first?.focus();
+                    }
+                }
+            };
+            const running = computed(() => props.progress.status === 'running');
+            const formatDuration = milliseconds => {
+                const seconds = Math.max(1, Math.ceil(milliseconds / 1000));
+                if (seconds < 60) return seconds + '秒';
+                const minutes = Math.ceil(seconds / 60);
+                return minutes < 60 ? minutes + '分钟' : Math.floor(minutes / 60) + '小时' + (minutes % 60 ? minutes % 60 + '分钟' : '');
+            };
+            const stageTiming = stage => {
+                if (props.progress.phase !== stage.key) return '';
+                if (!stage.current || !stage.elapsedMs) return '';
+                const remaining = stage.elapsedMs / stage.current * (stage.total - stage.current);
+                return '预计' + formatDuration(remaining);
+            };
+            const stages = computed(() => props.progress.stages.filter(stage => stage.total > 0));
+            const statusLabel = computed(() => ({ running: '正在补录', done: '', stopped: '已停止', error: '未完成' }[props.progress.status] || ''));
+            return { dialog, onKeydown, running, stages, statusLabel, stageTiming };
+        },
+        template: `
+            <modal-shell :show="show" overlay-class="z-[80] p-2 md:p-3"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+                <section ref="dialog" class="flex max-h-[94vh] flex-col outline-none" tabindex="-1"
+                    role="dialog" aria-modal="true" aria-labelledby="memory-backfill-title" @keydown="onKeydown">
+                    <modal-header @close="$emit('close')">
+                        <div class="flex items-center gap-3">
+                            <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 id="memory-backfill-title" class="text-lg font-bold text-gray-800 leading-tight">补录记忆</h3>
+                                <p v-if="statusLabel" class="text-xs text-gray-500" role="status" aria-live="polite">{{ statusLabel }}</p>
+                            </div>
+                        </div>
+                    </modal-header>
+                    <div class="flex-1 min-h-0 p-6 space-y-6 bg-gray-50/30 overflow-y-auto custom-scrollbar">
+                        <p v-if="progress.message" class="break-words text-sm leading-relaxed"
+                            :class="progress.status === 'error' ? 'text-red-600' : 'text-gray-500'" role="status">{{ progress.message }}</p>
+                        <div v-if="stages.length" class="space-y-4">
+                            <div v-for="stage in stages" :key="stage.key" class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
+                                    <span class="font-medium text-gray-700">{{ stage.title }}</span>
+                                    <span class="text-xs" :class="stage.current >= stage.total ? 'text-primary-600' : 'text-gray-400'">
+                                        {{ stage.current >= stage.total ? '已完成' : running ? (stageTiming(stage) || '等待中') : '未完成' }}
+                                    </span>
+                                </div>
+                                <div class="h-2 overflow-hidden rounded-full bg-gray-100" role="progressbar"
+                                    :aria-label="stage.title" :aria-valuenow="stage.current" aria-valuemin="0" :aria-valuemax="stage.total">
+                                    <div class="h-full rounded-full bg-primary-600 transition-[width] duration-300 motion-reduce:transition-none"
+                                        :style="{ width: Math.min(100, stage.current / stage.total * 100) + '%' }"></div>
+                                </div>
+                                <div class="mt-2 flex justify-between text-xs tabular-nums text-gray-500">
+                                    <span>{{ stage.current.toLocaleString() }} / {{ stage.total.toLocaleString() }} {{ stage.unit }}</span>
+                                    <span>{{ Math.floor(stage.current / stage.total * 100) }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 md:p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
+                        <button v-if="running" type="button" @click="$emit('stop')" class="modal-secondary-button">停止补录</button>
+                        <button v-else-if="stages.length && progress.status !== 'done'" type="button" @click="$emit('retry')" class="modal-secondary-button">继续补录</button>
+                        <button type="button" @click="$emit('close')" class="modal-primary-button">{{ running ? '后台继续' : '关闭' }}</button>
+                    </div>
+                </section>
+            </modal-shell>`
     };
 
     const StatusNoticeModal = {
@@ -619,7 +778,7 @@
         },
         emits: ['update:name', 'update:description', 'update:person', 'save'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-[70] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-[70] p-4"
                 panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-md max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden shadow-2xl transform transition-all scale-100">
                     <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain p-6 custom-scrollbar">
                         <div class="flex items-center justify-center w-12 h-12 rounded-full bg-primary-100 text-primary-600 mb-4 mx-auto">
@@ -678,6 +837,11 @@
                 draftSlotModels: ['', '', '']
             };
         },
+        computed: {
+            selectedModel() {
+                return this.target === 'quickModels' ? this.draftSlotModels[this.activeSlot] : this.currentModel;
+            }
+        },
         watch: {
             show(visible) {
                 if (visible && this.target === 'quickModels') {
@@ -687,75 +851,94 @@
             }
         },
         methods: {
+            selectionClass(active) {
+                return active ? 'border-primary-400 bg-primary-50 text-primary-700'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50';
+            },
             chooseModel(modelId) {
                 if (this.target !== 'quickModels') {
                     this.$emit('select', modelId);
                     return;
                 }
                 this.draftSlotModels[this.activeSlot] = this.draftSlotModels[this.activeSlot] === modelId ? '' : modelId;
-                this.draftSlotModels = [...this.draftSlotModels];
-                this.$emit('select-slots', [...this.draftSlotModels], this.activeSlot);
+                this.$emit('select-slots', [...this.draftSlotModels]);
             }
         },
         template: `
-            <transition name="fade">
-                <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4"
-                    panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] h-[90vh] flex flex-col shadow-2xl transform transition-all scale-100">
-                        <div class="p-4 border-b border-gray-100 flex justify-between items-center">
-                            <h3 class="text-lg font-bold text-gray-800">{{ target === 'quickModels' ? '聊天模型' : '选择模型' }}</h3>
-                            <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 focus:outline-none transition-colors">
-                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <modal-shell :show="show" overlay-class="z-50 p-3 sm:p-4"
+                    panel-class="model-selector-panel bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl overflow-hidden">
+                    <section class="flex min-h-0 flex-1 flex-col" role="dialog" aria-modal="true" aria-labelledby="model-selector-title"
+                        @keydown.esc.stop="$emit('close')">
+                        <div class="model-selector-heading flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 sm:px-5">
+                            <div class="flex min-w-0 items-center gap-3">
+                                <div class="rounded-xl bg-primary-50 p-2 text-primary-600">
+                                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 5h10a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2V7a2 2 0 012-2zM9 9h6v6H9z"></path>
+                                    </svg>
+                                </div>
+                                <h3 id="model-selector-title" class="text-base font-bold text-gray-900 sm:text-lg">{{ target === 'quickModels' ? '聊天主模型' : '选择模型' }}</h3>
+                            </div>
+                            <button type="button" @click="$emit('close')" aria-label="关闭模型选择" class="modal-close-button flex h-10 w-10 shrink-0 items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
                             </button>
                         </div>
-                        <div v-if="target === 'quickModels'" class="grid grid-cols-3 gap-2 p-4 pb-0">
+                        <div v-if="target === 'quickModels'" class="grid shrink-0 grid-cols-3 gap-2 px-4 pt-3 sm:px-5" role="group" aria-label="聊天主模型槽位">
                             <button v-for="(_, index) in draftSlotModels" :key="index" type="button"
-                                @click="activeSlot = index"
-                                :class="['min-w-0 rounded-xl border px-3 py-2.5 text-left transition-colors', activeSlot === index ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50']">
-                                <span class="block text-xs font-bold mb-1">槽位 {{ index + 1 }}</span>
+                                @click="activeSlot = index" :aria-pressed="activeSlot === index"
+                                class="min-w-0 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
+                                :class="selectionClass(activeSlot === index)">
+                                <span class="mb-1 flex items-center justify-between text-xs font-semibold">槽位 {{ index + 1 }}<span v-if="activeSlot === index" class="h-1.5 w-1.5 rounded-full bg-primary-600" aria-hidden="true"></span></span>
                                 <span class="block truncate text-[11px] font-mono" :title="draftSlotModels[index]">{{ draftSlotModels[index] || '未选择' }}</span>
                             </button>
                         </div>
-                        <div class="p-4 border-b border-gray-100 flex flex-col gap-3">
-                            <input :value="searchQuery" @input="$emit('update:search-query', $event.target.value)" type="text"
-                                :placeholder="target === 'memoryEmbeddingModel' ? '已锁定：embedding' : '检索模型...'"
-                                :readonly="target === 'memoryEmbeddingModel'"
-                                :title="target === 'memoryEmbeddingModel' ? '模型选择已锁定' : ''"
-                                :class="['w-full border rounded-lg px-4 py-2 focus:outline-none transition-all shadow-sm', target === 'memoryEmbeddingModel' ? 'bg-gray-100 border-gray-200 text-gray-400 placeholder-gray-400 cursor-not-allowed shadow-none select-none' : 'bg-gray-50/60 border-gray-300 text-gray-800 focus:ring-2 focus:ring-primary-500 focus:shadow-md']">
-                            <div class="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto custom-scrollbar items-center py-1">
-                                <button v-for="tag in tags" :key="tag.name" @click="$emit('update:active-tag', tag.name)" :class="[
-                                    'flex items-center px-3.5 py-1.5 text-xs font-bold rounded-full transition-all border outline-none active:scale-95 whitespace-nowrap',
-                                    activeTag === tag.name
-                                        ? 'bg-primary-50 text-primary-700 border-primary-300 shadow-sm'
-                                        : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50 hover:text-gray-700 hover:border-gray-300 shadow-sm'
-                                ]">
-                                    <span class="leading-none">{{ tag.name === 'all' ? '全部' : (tag.name === 'other' ? '其他' : tag.name.toUpperCase()) }}</span>
-                                    <span class="ml-1.5 opacity-60 font-mono text-[11px] leading-none">{{ tag.count }}</span>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="flex-1 overflow-y-auto p-2 min-h-[300px]">
-                            <div v-if="models.length === 0" class="flex flex-col items-center justify-center py-12 text-gray-400">
-                                <svg class="w-12 h-12 mb-3 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+                        <div class="flex shrink-0 flex-col gap-3 px-4 py-3 sm:px-5">
+                            <div class="relative">
+                                <svg class="pointer-events-none absolute left-3.5 top-3 h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="m21 21-5-5m2-6a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                 </svg>
-                                未找到模型或正在加载...
+                                <input :value="searchQuery" @input="$emit('update:search-query', $event.target.value)" type="text" aria-label="搜索模型"
+                                    autocomplete="off" spellcheck="false" :placeholder="target === 'memoryEmbeddingModel' ? '仅显示向量模型' : '搜索模型名称…'"
+                                    :readonly="target === 'memoryEmbeddingModel'"
+                                    :title="target === 'memoryEmbeddingModel' ? '仅显示 embedding 模型' : ''"
+                                    class="h-11 w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 py-2 pl-11 pr-11 text-base text-gray-800 placeholder-gray-400 transition-colors focus:border-primary-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-100 sm:text-sm">
+                                <button v-if="searchQuery && target !== 'memoryEmbeddingModel'" type="button" @click="$emit('update:search-query', '')"
+                                    aria-label="清空搜索" class="absolute right-0 top-0 flex h-11 w-11 items-center justify-center rounded-xl text-gray-400 hover:text-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
+                                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-width="2" d="m6 6 12 12M6 18 18 6"></path></svg>
+                                </button>
                             </div>
-                            <div class="space-y-1">
-                                <button v-for="model in models" :key="model.id" @click="chooseModel(model.id)"
-                                    class="w-full text-left px-4 py-3 rounded-xl hover:bg-gray-50 hover:shadow-[0_2px_4px_rgba(0,0,0,0.02)] transition-colors flex justify-between items-center group border border-transparent hover:border-gray-100 active:bg-gray-100">
-                                    <span class="text-gray-700 font-mono font-medium group-hover:text-primary-600 transition-colors">{{ model.id }}</span>
-                                    <span v-if="(target === 'quickModels' ? draftSlotModels[activeSlot] : currentModel) === model.id" class="text-primary-600 bg-primary-50 p-1 rounded-full shadow-sm">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                        </svg>
-                                    </span>
+                            <div class="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-1" role="group" aria-label="模型分类">
+                                <button v-for="tag in tags" :key="tag.name" type="button" @click="$emit('update:active-tag', tag.name)" :aria-pressed="activeTag === tag.name"
+                                    class="flex h-7 shrink-0 items-center rounded-lg border px-2.5 text-[11px] font-medium transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
+                                    :class="selectionClass(activeTag === tag.name)">
+                                    <span>{{ tag.name === 'all' ? '全部' : (tag.name === 'other' ? '其他' : tag.name.toUpperCase()) }}</span>
+                                    <span class="ml-1.5 text-[10px] tabular-nums">{{ tag.count }}</span>
                                 </button>
                             </div>
                         </div>
-                </modal-shell>
-            </transition>`
+                        <div class="model-selector-list min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-50/40 p-3 custom-scrollbar sm:p-4">
+                            <div v-if="models.length === 0" class="flex min-h-full flex-col items-center justify-center gap-3 py-8 text-sm text-gray-500">
+                                <svg class="h-9 w-9 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m21 21-5-5m2-6a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                                未找到可选模型
+                            </div>
+                            <div class="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="可选模型">
+                                <button v-for="model in models" :key="model.id" type="button" @click="chooseModel(model.id)"
+                                    :aria-label="model.id" :aria-pressed="selectedModel === model.id" :title="model.id"
+                                    class="flex min-h-[56px] min-w-0 items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 focus-visible:outline-offset-2"
+                                    :class="selectedModel === model.id ? 'border-primary-400 bg-primary-50 text-primary-800' : 'border-gray-200 bg-white text-gray-800 hover:border-primary-200 hover:bg-primary-50/40'">
+                                    <span class="min-w-0 flex-1 text-sm font-semibold leading-5 [overflow-wrap:anywhere]">{{ model.id }}</span>
+                                    <svg class="h-5 w-5 shrink-0 text-primary-600" :class="{ invisible: selectedModel !== model.id }"
+                                        fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="m6 12 4 4 8-8"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </section>
+            </modal-shell>`
     };
 
     const PaginationControls = {
@@ -787,65 +970,40 @@
         props: { show: Boolean },
         emits: ['close', 'create', 'generate', 'import-character'],
         template: `
-            <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
-                overlay-class="z-[60] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[60] p-4"
                 panel-class="compact-modal-panel">
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                            <svg class="w-6 h-6 mr-2 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                            </svg>
-                            添加角色卡
-                        </h3>
-                        <div class="grid grid-cols-1 gap-3">
-                            <button @click="$emit('create')" class="choice-card group">
-                                <div class="choice-card__icon">
-                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left">
-                                    <div class="font-bold">新建角色卡</div>
-                                    <div class="text-xs text-gray-500">从零开始创建一个角色卡</div>
-                                </div>
+                    <div class="choice-modal">
+                        <div class="choice-modal__head">
+                            <h3>添加角色卡</h3>
+                            <button type="button" @click="$emit('close')" class="modal-close-button" aria-label="关闭">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                             </button>
-                            <button @click="$emit('generate')" class="choice-card group">
-                                <div class="choice-card__icon">
-                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 8a3 3 0 11-6 0 3 3 0 016 0zm-3 5c-4 0-7 2-7 5v1h8m5-6v6m-3-3h6"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left">
-                                    <div class="font-bold">生成角色卡</div>
-                                    <div class="text-xs text-gray-500">使用AI一键生成角色卡</div>
-                                </div>
+                        </div>
+                        <p class="choice-modal__label">创建</p>
+                        <div class="choice-modal__list">
+                            <button type="button" @click="$emit('create')" class="choice-card">
+                                <span class="choice-card__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg></span>
+                                <span class="choice-card__body"><span class="choice-card__title">新建角色卡</span><span class="choice-card__desc">从零开始创建一个角色卡</span></span>
                             </button>
-                            <label class="choice-card group">
-                                <div class="choice-card__icon">
-                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left flex-1">
-                                    <div class="font-bold">导入角色卡</div>
-                                    <div class="text-xs text-gray-500">导入 .png 或 .json 文件</div>
-                                </div>
+                            <button type="button" @click="$emit('generate')" class="choice-card">
+                                <span class="choice-card__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 8a3 3 0 11-6 0 3 3 0 016 0zm-3 5c-4 0-7 2-7 5v1h8m5-6v6m-3-3h6"></path></svg></span>
+                                <span class="choice-card__body"><span class="choice-card__title">生成角色卡</span><span class="choice-card__desc">使用 AI 一键生成角色卡</span></span>
+                            </button>
+                        </div>
+                        <p class="choice-modal__label">导入</p>
+                        <div class="choice-modal__list">
+                            <label class="choice-card">
+                                <span class="choice-card__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></span>
+                                <span class="choice-card__body"><span class="choice-card__title">导入角色卡</span><span class="choice-card__desc">导入 .png 或 .json 文件</span></span>
                                 <input type="file" accept=".png,.json" @change="$emit('import-character', $event)" class="hidden">
                             </label>
-                            <label class="choice-card group">
-                                <div class="choice-card__icon">
-                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
-                                    </svg>
-                                </div>
-                                <div class="text-left flex-1">
-                                    <div class="font-bold">导入聊天记录</div>
-                                    <div class="text-xs text-gray-500">支持全部分支与聊天数据</div>
-                                </div>
+                            <label class="choice-card">
+                                <span class="choice-card__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg></span>
+                                <span class="choice-card__body"><span class="choice-card__title">导入聊天记录</span><span class="choice-card__desc">支持全部分支与聊天数据</span></span>
                                 <input type="file" accept=".jsonl" @change="$emit('import-character', $event)" class="hidden">
                             </label>
                         </div>
-                        <button @click="$emit('close')" class="mt-6 w-full py-3 text-red-500 font-medium hover:text-red-600 transition-colors">取消</button>
                     </div>
             </modal-shell>`
     };
@@ -854,7 +1012,7 @@
         props: { show: Boolean },
         emits: ['decide'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-[90] p-4"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-md flex flex-col shadow-2xl transform transition-all scale-100 overflow-hidden">
                     <div class="bg-gradient-to-r from-primary-50 to-blue-50 p-6 border-b border-gray-100">
                         <div class="flex items-center gap-3">
@@ -901,7 +1059,7 @@
         },
         emits: ['close', 'save', 'update:result-count', 'update:tavily-api-key'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-50 p-4"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[90vh] overflow-hidden">
                     <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
@@ -931,12 +1089,14 @@
                                 :min="minResultCount" :max="maxResultCount" step="1"
                                 class="compact-range w-full h-1.5 bg-primary-100 rounded-lg appearance-none cursor-pointer accent-primary-500">
                         </div>
-                        <div v-if="webTool" class="max-w-2xl mx-auto bg-white border border-gray-200 rounded-2xl p-5 md:p-6 shadow-sm space-y-5">
-                            <div>
-                                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Tavily API Key</label>
-                                <input :value="tool.tavilyApiKey" @input="$emit('update:tavily-api-key', $event.target.value.trim())" type="password"
-                                    class="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 focus:outline-none transition-all" placeholder="tvly-...">
+                        <div v-if="webTool" class="max-w-2xl mx-auto">
+                            <div class="mb-1.5 flex items-center justify-between gap-3">
+                                <label for="tavily-api-key" class="text-xs font-bold text-gray-500 uppercase tracking-wide">Tavily API Key</label>
+                                <a href="https://www.tavily.com/" target="_blank" rel="noopener noreferrer"
+                                    class="text-primary-600 hover:text-primary-700 hover:underline cursor-pointer transition-colors text-xs normal-case font-medium shrink-0">获取密钥</a>
                             </div>
+                            <input id="tavily-api-key" :value="tool.tavilyApiKey" @input="$emit('update:tavily-api-key', $event.target.value.trim())" type="password"
+                                class="w-full bg-white border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500 focus:outline-none transition-all" placeholder="tvly-...">
                         </div>
                     </div>
                     <div class="p-4 md:p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
@@ -945,6 +1105,35 @@
                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
                             保存工具
                         </button>
+                    </div>
+            </modal-shell>`
+    };
+
+    const MemoryCitationModal = {
+        props: { items: { type: Array, default: () => [] } },
+        emits: ['close'],
+        template: `
+            <modal-shell :show="items.length > 0" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[70] p-4" panel-class="compact-modal-panel memory-cite-panel">
+                    <div class="choice-modal">
+                        <div class="choice-modal__head">
+                            <div>
+                                <h3>判断依据</h3>
+                                <p>AI 写这句话时所参考的记忆</p>
+                            </div>
+                            <button type="button" @click="$emit('close')" class="modal-close-button" aria-label="关闭">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                        <div class="memory-cite-list">
+                            <article v-for="item in items" :key="item.no" class="memory-cite-card">
+                                <header>
+                                    <b>{{ item.turnLabel || '未知轮次' }}</b>
+                                </header>
+                                <p v-if="item.missing" class="is-missing">这条记忆已不存在，可能已被删除、清空或重新整理。</p>
+                                <p v-else>{{ item.summary }}</p>
+                            </article>
+                        </div>
                     </div>
             </modal-shell>`
     };
@@ -960,7 +1149,7 @@
         },
         emits: ['close', 'save', 'update:name', 'update:role', 'update:content'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-50 p-2 md:p-3"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-2xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
                     <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
@@ -1002,6 +1191,14 @@
             </modal-shell>`
     };
 
+    // Methods shared by the editor modals below.
+    function updateField(field, value) {
+        this.$emit('update-field', { field, value });
+    }
+    function updateNumber(field, value) {
+        this.updateField(field, value === '' ? '' : Number(value));
+    }
+
     const CharacterEditorModal = {
         props: {
             show: Boolean,
@@ -1018,13 +1215,9 @@
                 { value: 'first_mes', label: '开场白' }
             ]
         }),
-        methods: {
-            updateField(field, value) {
-                this.$emit('update-field', { field, value });
-            }
-        },
+        methods: { updateField },
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-0 md:p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-50 p-0 md:p-4"
                 panel-class="bg-white md:rounded-2xl border-0 md:border border-gray-200 w-full max-w-2xl h-full md:h-[750px] flex flex-col shadow-2xl overflow-hidden">
                     <div class="p-3 md:p-5 border-b border-gray-100 flex flex-col gap-4 bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
                         <div class="flex justify-between items-center">
@@ -1107,9 +1300,7 @@
         },
         emits: ['close', 'save', 'update-field'],
         methods: {
-            updateField(field, value) {
-                this.$emit('update-field', { field, value });
-            },
+            updateField,
             togglePlacement(value) {
                 const placement = Array.isArray(this.script.placement) ? [...this.script.placement] : [];
                 const index = placement.indexOf(value);
@@ -1121,12 +1312,10 @@
                 this.updateField(key, checked);
                 if (checked) this.updateField(key === 'markdownOnly' ? 'promptOnly' : 'markdownOnly', false);
             },
-            updateNumber(field, value) {
-                this.updateField(field, value === '' ? '' : Number(value));
-            }
+            updateNumber
         },
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-50 p-2 md:p-3"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
                     <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
@@ -1247,11 +1436,11 @@
         },
         emits: ['close', 'save', 'update:tab', 'update-field'],
         methods: {
-            updateField(field, value) {
-                this.$emit('update-field', { field, value });
-            },
-            updateNumber(field, value) {
-                this.updateField(field, value === '' ? '' : Number(value));
+            updateField,
+            updateNumber,
+            formatLogMeta(log) {
+                const time = Number(log.time) ? new Date(log.time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+                return [log.turn ? `第 ${log.turn} 轮` : '', time].filter(Boolean).join(' · ');
             },
             formatChangeValue(value) {
                 if (value === undefined || value === null || value === '') return '空';
@@ -1264,10 +1453,6 @@
             },
             checkProtocol() {
                 const utils = window.RPHubUiTemplateUtils;
-                if (!utils?.normalizeUiTemplateUpdateList) {
-                    this.protocolCheck = { ok: false, message: '模板校验器尚未加载' };
-                    return;
-                }
                 let variableState;
                 try {
                     variableState = JSON.parse(this.templateData.variableStateText || '{}');
@@ -1300,7 +1485,16 @@
             }
         },
         data() {
-            return { protocolCheck: null, protocolCheckTimer: null };
+            return {
+                protocolCheck: null,
+                protocolCheckTimer: null,
+                codeTab: 'html',
+                codeTabs: Object.freeze([
+                    { value: 'html', label: 'HTML' },
+                    { value: 'state', label: '变量 JSON' },
+                    { value: 'schema', label: '变量说明' }
+                ])
+            };
         },
         computed: {
             protocolCheckInput() {
@@ -1327,8 +1521,8 @@
             clearTimeout(this.protocolCheckTimer);
         },
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
-                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-4xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
+            <modal-shell :show="show" overlay-class="z-50 p-2 md:p-3"
+                panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-6xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
                     <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
                             <div class="p-2 bg-primary-50 text-primary-600 rounded-lg">
@@ -1341,32 +1535,39 @@
                         </div>
                     </modal-header>
 
-                    <div class="flex-1 overflow-y-auto custom-scrollbar p-6 bg-gray-50/30 space-y-6">
+                    <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6 space-y-5">
                         <div class="segmented-switch segmented-switch--slim">
                             <div class="segmented-switch__indicator" :class="{ 'is-right': tab !== 'history' }"></div>
                             <button @click="$emit('update:tab', 'history')" class="segmented-switch__option" :class="{ 'is-active': tab === 'history' }"><span>变更记录</span></button>
                             <button @click="$emit('update:tab', 'edit')" class="segmented-switch__option" :class="{ 'is-active': tab === 'edit' }"><span>编辑内容</span></button>
                         </div>
 
-                        <div v-if="tab === 'history'" class="space-y-4">
-                            <div v-if="!(templateData.changeLog || []).length" class="bg-white border border-dashed border-gray-200 rounded-2xl p-8 text-center text-gray-400">暂无变更记录</div>
-                            <div v-else class="space-y-3">
-                                <div v-for="log in (templateData.changeLog || []).slice(0, 1)" :key="log.id" class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
-                                    <div class="mt-3 space-y-3">
-                                        <div v-for="(change, key) in (log.changes || {})" :key="key" class="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
-                                            <div class="text-xs font-bold text-gray-700 mb-2">{{ key }}</div>
-                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                <div class="bg-white border border-gray-100 rounded-lg px-3 py-2 text-xs text-gray-600 leading-relaxed"><span class="font-bold text-gray-400">前：</span><span class="whitespace-pre-wrap break-words">{{ formatChangeValue(change && change.from) }}</span></div>
-                                                <div class="bg-white border border-primary-100 rounded-lg px-3 py-2 text-xs text-gray-800 leading-relaxed"><span class="font-bold text-primary-500">后：</span><span class="whitespace-pre-wrap break-words">{{ formatChangeValue(change && change.to) }}</span></div>
-                                            </div>
-                                        </div>
+                        <template v-if="tab === 'history'">
+                            <div v-if="!(templateData.changeLog || []).length" class="empty-state">
+                                <svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 8v4l2.5 1.5M3.05 11a9 9 0 1 1 .5 4M3 4v5h5"></path>
+                                </svg>
+                                <p>暂无变更记录</p>
+                                <small>变量分析更新这个模板后，最近一次的变化会显示在这里</small>
+                            </div>
+                            <section v-for="log in (templateData.changeLog || []).slice(0, 1)" :key="log.id" class="ui-template-history">
+                                <header class="ui-template-history__meta">
+                                    <span>最近一次变更</span>
+                                    <span>{{ formatLogMeta(log) }}</span>
+                                </header>
+                                <div v-for="(change, key) in (log.changes || {})" :key="key" class="ui-template-history__row">
+                                    <code class="ui-template-history__key">{{ key }}</code>
+                                    <div class="ui-template-history__values">
+                                        <del>{{ formatChangeValue(change && change.from) }}</del>
+                                        <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-label="变为"><path d="M5 12h14m-6-6 6 6-6 6"></path></svg>
+                                        <ins>{{ formatChangeValue(change && change.to) }}</ins>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
+                            </section>
+                        </template>
 
-                        <div v-else class="space-y-6">
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div v-else class="space-y-5">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 <div>
                                     <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">模板名称</label>
                                     <input :value="templateData.name" @input="updateField('name', $event.target.value)" type="text"
@@ -1387,41 +1588,36 @@
                                 </div>
                             </div>
 
-                            <details class="group bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-                                <summary class="list-none cursor-pointer select-none px-4 py-3 flex items-center justify-between gap-3 hover:bg-gray-50 transition-colors">
-                                    <span class="text-xs font-bold text-gray-500 uppercase tracking-wide">HTML模板</span>
-                                    <span class="flex items-center gap-2 text-[11px] font-bold text-gray-400">
-                                        <span class="group-open:hidden">展开</span><span class="hidden group-open:inline">折叠</span>
-                                        <svg class="w-4 h-4 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                    </span>
-                                </summary>
-                                <textarea :value="templateData.htmlTemplate" @input="updateField('htmlTemplate', $event.target.value)" rows="22"
-                                    class="w-full bg-white border-0 border-t border-gray-100 rounded-none px-4 py-3 text-gray-800 focus:ring-2 focus:ring-inset focus:ring-primary-500 focus:outline-none font-mono text-sm shadow-inner leading-relaxed resize-y min-h-[460px]" placeholder="<section>...</section>"></textarea>
-                            </details>
-                            <div v-if="protocolCheck" aria-live="polite" class="rounded-xl border px-4 py-3 text-sm" :class="protocolCheck.ok ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700' : 'border-rose-200 bg-rose-50/70 text-rose-700'">
-                                <div class="font-bold">{{ protocolCheck.ok ? protocolCheck.message : '模板协议检查未通过' }}</div>
-                                <div v-if="!protocolCheck.ok" class="mt-1 text-xs whitespace-pre-wrap break-words">{{ protocolCheck.message }}</div>
-                            </div>
-                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">变量JSON</label>
-                                    <textarea :value="templateData.variableStateText" @input="updateField('variableStateText', $event.target.value)" rows="22"
-                                        class="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:outline-none text-sm shadow-inner leading-relaxed resize-y min-h-[460px]" placeholder='{"status":"平稳","equipment":[{"slot":"武器","name":"短剑","durability":80}]}'></textarea>
-                                </div>
-                                <div>
-                                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">变量说明（给AI参考，可选）</label>
-                                    <textarea :value="templateData.variableSchemaText" @input="updateField('variableSchemaText', $event.target.value)" rows="22"
-                                        class="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:outline-none text-sm shadow-inner leading-relaxed resize-y min-h-[460px]" placeholder="例如：status 表示角色当前身体和情绪状态；location 表示当前场景地点；relationship 表示双方关系变化。"></textarea>
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">原始状态预览</label>
-                                <div class="ui-template-preview w-full bg-white p-0 overflow-visible min-h-[460px]" v-html="previewHtml"></div>
+                            <!-- Code on the left, a live stage on the right (stacked on phones) -->
+                            <div class="ui-template-workspace">
+                                <section class="min-w-0">
+                                    <div class="segmented-switch segmented-switch--compact segmented-switch--three">
+                                        <div class="segmented-switch__indicator" :class="{ 'is-position-2': codeTab === 'state', 'is-position-3': codeTab === 'schema' }"></div>
+                                        <button v-for="option in codeTabs" :key="option.value" type="button" @click="codeTab = option.value"
+                                            class="segmented-switch__option" :class="{ 'is-active': codeTab === option.value }">{{ option.label }}</button>
+                                    </div>
+                                    <textarea v-show="codeTab === 'html'" :value="templateData.htmlTemplate" @input="updateField('htmlTemplate', $event.target.value)"
+                                        class="ui-template-code" spellcheck="false" aria-label="HTML模板" placeholder="<section>...</section>"></textarea>
+                                    <textarea v-show="codeTab === 'state'" :value="templateData.variableStateText" @input="updateField('variableStateText', $event.target.value)"
+                                        class="ui-template-code" spellcheck="false" aria-label="变量JSON" placeholder='{"status":"平稳","equipment":[{"slot":"武器","name":"短剑","durability":80}]}'></textarea>
+                                    <textarea v-show="codeTab === 'schema'" :value="templateData.variableSchemaText" @input="updateField('variableSchemaText', $event.target.value)"
+                                        class="ui-template-code ui-template-code--prose" aria-label="变量说明" placeholder="给 AI 参考，可选。例如：status 表示角色当前身体和情绪状态；location 表示当前场景地点；relationship 表示双方关系变化。"></textarea>
+                                </section>
+                                <section class="ui-template-stage-wrap">
+                                    <div class="ui-template-stage-label">预览<span>使用初始变量</span></div>
+                                    <div class="ui-template-stage"><div class="ui-template-preview" v-html="previewHtml"></div></div>
+                                    <div v-if="protocolCheck" aria-live="polite" class="ui-template-check" :class="protocolCheck.ok ? 'is-ok' : 'is-error'">
+                                        <svg fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                                            <path :d="protocolCheck.ok ? 'M20 6 9 17l-5-5' : 'M12 8v5m0 3.5h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'"></path>
+                                        </svg>
+                                        <span>{{ protocolCheck.ok ? protocolCheck.message : '协议检查未通过：' + protocolCheck.message }}</span>
+                                    </div>
+                                </section>
                             </div>
                         </div>
                     </div>
 
-                    <div v-if="tab === 'edit'" class="p-4 md:p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
+                    <div v-if="tab === 'edit'" class="p-4 md:p-5 border-t border-gray-100 flex justify-end space-x-3 bg-gray-50/80 flex-shrink-0">
                         <button @click="$emit('close')" class="modal-secondary-button">取消</button>
                         <button @click="$emit('save')" class="modal-primary-button">
                             <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
@@ -1443,19 +1639,15 @@
         },
         emits: ['close', 'save', 'update-field', 'update-keys'],
         methods: {
-            updateField(field, value) {
-                this.$emit('update-field', { field, value });
-            },
-            updateNumber(field, value) {
-                this.updateField(field, value === '' ? '' : Number(value));
-            },
+            updateField,
+            updateNumber,
             updateRegexMode(checked) {
                 this.updateField('useRegex', checked);
                 this.$emit('update-keys', this.keysText);
             }
         },
         template: `
-            <modal-shell v-if="show" overlay-class="z-50 bg-black/50 backdrop-blur-sm p-2 md:p-3 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-50 p-2 md:p-3"
                 panel-class="bg-white rounded-2xl border border-gray-200 w-full max-w-3xl flex flex-col shadow-2xl max-h-[94vh] overflow-hidden">
                     <modal-header @close="$emit('close')">
                         <div class="flex items-center gap-3">
@@ -1520,11 +1712,11 @@
                                                 class="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-primary-500 focus:outline-none" placeholder="100">
                                         </div>
                                         <div>
-                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">触发概率 (%)</label>
+                                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">触发概率</label>
                                             <div :class="['flex items-center border rounded-xl transition-all overflow-hidden shadow-sm', entry.useProbability ? 'border-primary-300 ring-2 ring-primary-500/10' : 'border-gray-200 opacity-60']">
                                                 <button @click="updateField('useProbability', !entry.useProbability)"
                                                     :class="['px-3 py-2 transition-colors border-r', entry.useProbability ? 'bg-primary-600 text-white border-primary-600' : 'bg-gray-100 text-gray-400 border-gray-200']">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                                    <span class="block w-4 h-4 text-sm font-bold leading-4 text-center">%</span>
                                                 </button>
                                                 <input type="number" :value="entry.probability" @input="updateNumber('probability', $event.target.value)" min="0" max="100"
                                                     class="w-full bg-white px-3 py-1.5 text-sm font-bold text-gray-700 focus:outline-none" :disabled="!entry.useProbability" placeholder="100">
@@ -1573,7 +1765,7 @@
         },
         emits: ['close', 'select-all', 'deselect-all', 'toggle', 'confirm'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-[90] p-4"
                 panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-lg flex flex-col shadow-2xl max-h-[80vh] overflow-hidden">
                     <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/80 backdrop-blur-sm flex-shrink-0">
                         <h3 class="text-lg font-bold text-gray-800">选择导出项目</h3>
@@ -1624,26 +1816,22 @@
             ]
         }),
         template: `
-            <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
-                overlay-class="z-[90] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[90] p-4"
                 panel-class="compact-modal-panel">
-                    <div class="p-6">
-                        <h3 class="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                            <svg class="w-6 h-6 mr-2 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                            导出选项
-                        </h3>
-                        <div class="grid grid-cols-1 gap-3">
-                            <button v-for="option in options" :key="option.type" @click="$emit('export', option.type)" class="choice-card">
-                                <div class="choice-card__icon">
-                                    <svg class="w-6 h-6 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="option.path"></path></svg>
-                                </div>
-                                <div class="flex-1">
-                                    <div class="font-bold text-base mb-0.5">{{ option.title }}</div>
-                                    <div class="text-[11px] text-gray-500">{{ option.description }}</div>
-                                </div>
+                    <div class="choice-modal">
+                        <div class="choice-modal__head">
+                            <h3>导出选项</h3>
+                            <button type="button" @click="$emit('close')" class="modal-close-button" aria-label="关闭">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                             </button>
                         </div>
-                        <button @click="$emit('close')" class="mt-6 w-full py-3 text-red-500 font-medium hover:text-red-600 transition-colors">取消</button>
+                        <div class="choice-modal__list">
+                            <button v-for="option in options" :key="option.type" type="button" @click="$emit('export', option.type)" class="choice-card">
+                                <span class="choice-card__icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="option.path"></path></svg></span>
+                                <span class="choice-card__body"><span class="choice-card__title">{{ option.title }}</span><span class="choice-card__desc">{{ option.description }}</span></span>
+                            </button>
+                        </div>
                     </div>
             </modal-shell>`
     };
@@ -1655,7 +1843,7 @@
         },
         emits: ['confirm', 'cancel'],
         template: `
-            <modal-shell v-if="show" overlay-class="z-[160] bg-black/50 backdrop-blur-sm p-4 animate-fade-in"
+            <modal-shell :show="show" overlay-class="z-[160] p-4"
                 panel-class="bg-white rounded-xl border border-gray-200 w-full max-w-sm flex flex-col shadow-2xl transform transition-all scale-100">
                     <div class="p-6 text-center">
                         <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
@@ -1676,10 +1864,7 @@
     const RetryConfirmModal = {
         props: { state: { type: Object, required: true } },
         template: `
-            <transition enter-active-class="transition duration-300 ease-modal-fade" enter-from-class="opacity-0"
-                enter-to-class="opacity-100" leave-active-class="transition duration-200 ease-in"
-                leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <modal-shell v-if="state.show" overlay-class="z-[200] bg-black/40 backdrop-blur-[2px] px-4 pt-4 pb-20 text-center sm:p-0"
+            <modal-shell :show="state.show" overlay-class="z-[200] px-4 pt-4 pb-20 text-center sm:p-0"
                     panel-class="bg-white rounded-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.15)] transform transition-transform w-full max-w-sm overflow-hidden relative z-10 border border-gray-100 p-6 flex flex-col items-center animate-slide-up">
                         <div class="w-12 h-12 rounded-full bg-yellow-50 flex items-center justify-center mb-4 border border-yellow-100 shadow-sm">
                             <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1692,8 +1877,7 @@
                             <button @click="state.onCancel" class="flex-1 py-2.5 px-4 bg-gray-50 hover:bg-gray-100 text-gray-600 font-bold rounded-xl transition-all border border-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-300 hover:-translate-y-0.5">取消中断</button>
                             <button @click="state.onConfirm" class="flex-1 py-2.5 px-4 bg-primary-600 hover:bg-primary-500 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-primary-400 hover:-translate-y-0.5">立即重试</button>
                         </div>
-                </modal-shell>
-            </transition>`
+            </modal-shell>`
     };
 
     const ContextViewerModal = {
@@ -1705,82 +1889,114 @@
             messages: { type: Array, default: () => [] }
         },
         emits: ['close'],
+        setup(props) {
+            const roleLabels = { system: '系统提示词', memory: '记忆', user: '用户', assistant: 'AI', tool: '工具' };
+            const getRoleKey = message => message.isMemory ? 'memory' : (roleLabels[message.role] ? message.role : 'system');
+            // 统计时对话楼层里的用户和 AI 合并为“原文”，预注入、角色设定这类不在楼层里的消息算系统提示词；
+            // 世界书正文从所在消息里拆出来单独计数；消息条的颜色跟统计分类一致。
+            const compositionLabels = { system: '系统提示词', worldinfo: '世界书', memory: '记忆', original: '原文', tool: '工具' };
+            const getCompositionKey = message => {
+                const key = getRoleKey(message);
+                if (!['user', 'assistant'].includes(key)) return key;
+                return message.floor ? 'original' : 'system';
+            };
+            const openIndexes = ref(new Set());
+            watch(() => props.messages, () => { openIndexes.value = new Set(); });
+            // 各类消息占了多少字，一眼看出上下文主要花在哪里。
+            const composition = computed(() => {
+                const totals = {};
+                props.messages.forEach(message => {
+                    const key = getCompositionKey(message);
+                    const worldInfoChars = Number(message.worldInfoChars) || 0;
+                    totals[key] = (totals[key] || 0) + String(message.content || '').length - worldInfoChars;
+                    totals.worldinfo = (totals.worldinfo || 0) + worldInfoChars;
+                });
+                const sum = Object.values(totals).reduce((total, value) => total + value, 0) || 1;
+                return Object.keys(compositionLabels).filter(key => totals[key] > 0)
+                    .map(key => ({ key, label: compositionLabels[key], chars: totals[key], share: totals[key] / sum * 100 }));
+            });
+            const toggle = index => {
+                const next = new Set(openIndexes.value);
+                if (!next.delete(index)) next.add(index);
+                openIndexes.value = next;
+            };
+            const preview = message => String(message.content || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+            // 不在对话楼层里的用户 / AI 消息是预注入，用灰字标出来代替楼层号。
+            const isPreInjection = message => !message.floor && ['user', 'assistant'].includes(getRoleKey(message));
+            const triggerText = item => (!item.triggers || item.triggers === '常驻' || item.name?.includes('记忆'))
+                ? item.triggers : `触发：${item.triggers}`;
+            return { roleLabels, getRoleKey, getCompositionKey, openIndexes, composition, toggle, preview, isPreInjection, triggerText };
+        },
         template: `
-            <transition enter-active-class="transition-opacity duration-300 ease-modal-fade" enter-from-class="opacity-0"
-                enter-to-class="opacity-100" leave-active-class="transition-opacity duration-200 ease-in"
-                leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
-                    overlay-class="z-[100] bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
-                    panel-class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden max-h-[90vh] sm:max-h-[85vh] border border-gray-200/50 relative">
-                        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 flex-shrink-0">
-                            <div class="flex items-center space-x-3">
-                                <div class="text-blue-600">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                                </div>
-                                <div>
-                                    <h3 class="text-lg font-bold text-gray-800 pr-10">真实上下文请求</h3>
-                                    <p class="mt-0.5 text-xs font-medium text-gray-500">共 {{ floors }} 楼 · 总字数 {{ Number(totalLength || 0).toLocaleString() }}</p>
-                                </div>
+            <modal-shell :show="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[100] p-3 sm:p-6"
+                panel-class="ctx-viewer w-full max-w-4xl flex flex-col overflow-hidden max-h-[90vh] sm:max-h-[85vh]">
+                    <modal-header @close="$emit('close')">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="w-9 h-9 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                </svg>
                             </div>
-                            <button @click="$emit('close')" class="text-gray-400 hover:text-red-500 transition-colors bg-gray-100 hover:bg-red-50 p-2 rounded-full absolute top-4 right-4 z-50">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                            </button>
-                        </div>
-
-                        <div class="p-5 overflow-y-auto flex-1 space-y-3 bg-gray-50 custom-scrollbar overscroll-contain relative">
-                            <details class="group bg-blue-50/80 border border-blue-200/60 rounded-xl shadow-sm mb-4">
-                                <summary class="font-bold text-blue-800 flex items-center p-4 text-sm cursor-pointer select-none outline-none">
-                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                                    <span>本次插入的世界书 (共 {{ worldInfos.length }} 项)</span>
-                                    <div class="ml-auto flex items-center">
-                                        <svg class="w-4 h-4 text-blue-500 group-open:rotate-180 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                    </div>
-                                </summary>
-                                <div class="px-4 pb-4 pt-0">
-                                    <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto custom-scrollbar">
-                                        <div v-for="(wi, index) in worldInfos" :key="'wi-' + index" class="bg-blue-100 text-blue-700 border-blue-200 px-2.5 py-1.5 rounded-md text-xs shadow-sm border flex flex-col justify-center">
-                                            <span class="font-bold pb-0.5">{{ wi.name }}</span>
-                                            <span v-if="wi.triggers" class="text-blue-600/90 border-blue-200/50 font-normal text-[10px] mt-0.5 pt-0.5 border-t leading-none">{{ wi.triggers === '常驻' ? '常驻' : wi.name && wi.name.startsWith('角色记忆') ? wi.triggers : '触发: ' + wi.triggers }}</span>
-                                        </div>
-                                        <span v-if="worldInfos.length === 0" class="text-blue-500/80 text-sm italic">未触发任何世界书或世界书功能关闭。</span>
-                                    </div>
-                                </div>
-                            </details>
-
-                            <div class="space-y-3 pb-4">
-                                <div v-for="(message, index) in messages" :key="index" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all hover:shadow-md group/msg">
-                                    <details class="group">
-                                        <summary class="flex flex-col p-3.5 bg-gray-50/50 hover:bg-gray-100/50 cursor-pointer select-none transition-colors gap-2">
-                                            <div class="flex flex-row justify-between items-center w-full">
-                                                <div class="flex items-center gap-2">
-                                                    <span class="meta-badge meta-badge--role" :class="'meta-badge--' + (message.isMemory ? 'memory' : message.role)">
-                                                        <span v-if="message.floor" class="opacity-70 mr-1 font-bold">F{{ message.floor }}</span> {{ message.isMemory ? '记忆' : message.role }}
-                                                    </span>
-                                                    <span class="meta-badge">{{ message.content.length }} 字符</span>
-                                                </div>
-                                                <div class="flex items-center flex-shrink-0 ml-2">
-                                                    <svg class="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                                                </div>
-                                            </div>
-                                            <div v-if="message.wiTriggers && message.wiTriggers.length" class="flex flex-wrap gap-1.5 items-center w-full">
-                                                <div v-for="(trigger, triggerIndex) in message.wiTriggers" :key="triggerIndex" class="bg-blue-100 text-blue-700 border-blue-200 px-2 py-0.5 rounded flex flex-col border">
-                                                    <span class="text-[11px] font-semibold tracking-wide">{{ trigger.name }}</span>
-                                                    <span v-if="trigger.triggers" class="text-blue-600/90 border-blue-200/50 text-[9px] font-normal mt-[1px] pt-[1px] border-t leading-[10px]">{{ trigger.triggers === '常驻' ? '常驻' : trigger.name && trigger.name.startsWith('角色记忆') ? trigger.triggers : '触发: ' + trigger.triggers }}</span>
-                                                </div>
-                                            </div>
-                                        </summary>
-                                        <div class="p-4 bg-white border-t border-gray-100 text-[13px] text-gray-700 whitespace-pre-wrap leading-relaxed max-h-[500px] overflow-y-auto custom-scrollbar decoration-clone selection:bg-blue-200 selection:text-blue-900 break-words" v-html="message.renderedContent"></div>
-                                    </details>
-                                </div>
-
-                                <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-12 text-gray-400">
-                                    <svg class="w-12 h-12 mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                                    <p>暂无上下文记录，请先执行一次生成请求。</p>
-                                </div>
+                            <div class="min-w-0">
+                                <h3 class="text-lg font-bold text-gray-800 leading-tight">上下文查看器</h3>
+                                <p class="mt-0.5 text-xs text-gray-500 truncate">{{ floors }} 楼 · {{ Number(totalLength || 0).toLocaleString() }} 字</p>
                             </div>
                         </div>
-                </modal-shell>
-            </transition>`
+                    </modal-header>
+
+                    <div class="ctx-viewer__body custom-scrollbar">
+                        <section v-if="composition.length" class="ctx-section">
+                            <div class="usage-meter" aria-hidden="true">
+                                <span v-for="part in composition" :key="part.key" :class="'ctx-tone--' + part.key" :style="{ flexGrow: part.share }"></span>
+                            </div>
+                            <ul class="ctx-legend">
+                                <li v-for="part in composition" :key="part.key">
+                                    <i class="usage-swatch" :class="'ctx-tone--' + part.key"></i>{{ part.label }}<b>{{ part.chars.toLocaleString() }}</b>
+                                </li>
+                            </ul>
+                        </section>
+
+                        <section class="ctx-section">
+                            <h4 class="ctx-section__title">插入的世界书<span class="ctx-count">{{ worldInfos.length }}</span></h4>
+                            <div v-if="worldInfos.length" class="ctx-tags">
+                                <span v-for="(item, index) in worldInfos" :key="'wi-' + index" class="ctx-tag">
+                                    <b>{{ item.name }}</b><small v-if="item.triggers">{{ triggerText(item) }}</small>
+                                </span>
+                            </div>
+                            <p v-else class="ctx-muted">没有触发世界书，或世界书功能已关闭。</p>
+                        </section>
+
+                        <section class="ctx-section">
+                            <h4 class="ctx-section__title">消息<span class="ctx-count">{{ messages.length }}</span></h4>
+                            <ol v-if="messages.length" class="ctx-messages">
+                                <li v-for="(message, index) in messages" :key="index" class="ctx-message" :class="'ctx-tone--' + getCompositionKey(message)">
+                                    <button type="button" class="ctx-message__head" :aria-expanded="openIndexes.has(index)" @click="toggle(index)">
+                                        <span class="ctx-role">{{ roleLabels[getRoleKey(message)] }}</span>
+                                        <span v-if="message.floor" class="ctx-floor">F{{ message.floor }}</span>
+                                        <span v-else-if="isPreInjection(message)" class="ctx-floor is-text">预注入</span>
+                                        <span class="ctx-preview">{{ preview(message) }}</span>
+                                        <span class="ctx-length">{{ String(message.content || '').length.toLocaleString() }} 字</span>
+                                        <svg class="ctx-chevron" :class="{ 'is-open': openIndexes.has(index) }" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    </button>
+                                    <div v-if="message.wiTriggers && message.wiTriggers.length" class="ctx-tags ctx-message__tags">
+                                        <span v-for="(trigger, triggerIndex) in message.wiTriggers" :key="triggerIndex" class="ctx-tag">
+                                            <b>{{ trigger.name }}</b><small v-if="trigger.triggers">{{ triggerText(trigger) }}</small>
+                                        </span>
+                                    </div>
+                                    <div v-if="openIndexes.has(index)" class="ctx-message__body">
+                                        <div class="ctx-content custom-scrollbar" v-html="message.renderedContent"></div>
+                                    </div>
+                                </li>
+                            </ol>
+                            <div v-else class="empty-state">
+                                <svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                <p>暂无上下文记录</p>
+                                <small>发送一条消息后，这里会显示实际发给模型的内容</small>
+                            </div>
+                        </section>
+                    </div>
+            </modal-shell>`
     };
 
     const TokenUsageView = {
@@ -1802,35 +2018,51 @@
             formatAggregate: { type: Function, required: true },
             formatCount: { type: Function, required: true },
             formatTime: { type: Function, required: true },
-            getTypeLabel: { type: Function, required: true },
+            getCategory: { type: Function, required: true },
             getUncachedInput: { type: Function, required: true }
         },
         emits: [
             'menu', 'clear', 'update:filter', 'update:time-filter', 'update:show-time-filter',
             'update:page', 'update:help-topic'
         ],
-        setup() {
+        setup(props) {
+            const filterOptions = Object.freeze([
+                { value: 'all', label: '全部', position: '' },
+                { value: 'chat', label: '主对话', position: 'is-position-2' },
+                { value: 'memory', label: '记忆系统', position: 'is-position-3' },
+                { value: 'variables', label: '变量分析', position: 'is-position-4' }
+            ]);
+            // The meter splits the total into tokens sent fresh, tokens the cache served and tokens returned.
+            const parts = computed(() => [
+                { key: 'input', label: '输入', value: props.stats.inputTokens, reports: props.stats.inputTokensReports },
+                { key: 'cache', label: '缓存', value: props.stats.cacheReadTokens, reports: props.stats.cacheReadTokensReports },
+                { key: 'output', label: '输出', value: props.stats.outputTokens, reports: props.stats.outputTokensReports }
+            ]);
+            const total = computed(() => parts.value.reduce((sum, part) => sum + (part.value || 0), 0));
+            const totalReports = computed(() => parts.value.reduce((sum, part) => sum + (part.reports || 0), 0));
+            // Under a second in ms, under a minute in seconds (12.3s), longer as minutes and seconds (2m5s).
             const formatDuration = (value) => {
-                if (!Number.isFinite(value)) return '--';
+                if (!Number.isFinite(value)) return '';
                 if (value < 1000) return `${Math.round(value)}ms`;
-                return `${Number((value / 1000).toFixed(1))}s`;
+                if (value < 59950) return `${Number((value / 1000).toFixed(1))}s`;
+                const seconds = Math.round(value / 1000);
+                return `${Math.floor(seconds / 60)}m${seconds % 60}s`;
             };
             const formatOutputSpeed = (record) => {
-                if (record?.isStream !== true
-                    || !Number.isFinite(record?.durationMs) || record.durationMs <= 0
-                    || !Number.isFinite(record?.outputCharacters) || record.outputCharacters <= 0) return '--';
-                return `${Math.round(record.outputCharacters * 1000 / record.durationMs)}字/s`;
+                if (record.isStream !== true
+                    || !Number.isFinite(record.durationMs) || record.durationMs <= 0
+                    || !Number.isFinite(record.outputCharacters) || record.outputCharacters <= 0) return '';
+                return `${Math.round(record.outputCharacters * 1000 / record.durationMs)} 字/s`;
             };
             return {
+                filterOptions,
                 formatDuration,
                 formatOutputSpeed,
                 formatQuota: quota => `¥${(Math.trunc(quota / 500000 * 10000) / 10000).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`,
-                filterOptions: Object.freeze([
-                    { value: 'all', label: '全部', position: '' },
-                    { value: 'chat', label: '主对话', position: 'is-position-2' },
-                    { value: 'memory', label: '记忆系统', position: 'is-position-3' },
-                    { value: 'variables', label: '变量分析', position: 'is-position-4' }
-                ])
+                parts,
+                total,
+                totalReports,
+                typeLabels: Object.fromEntries(filterOptions.map(option => [option.value, option.label]))
             };
         },
         template: `
@@ -1841,8 +2073,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 19V9m5 10V5m5 14v-7m5 7V3M3 21h18"></path>
                         </svg>
                     </template>
-                    <button v-if="historyLength > 0" @click="$emit('clear')"
-                        class="flex-shrink-0 rounded-xl border border-gray-200 bg-white p-2.5 text-red-600 shadow-sm transition-all hover:border-red-100 hover:bg-red-50 active:scale-95"
+                    <button v-if="historyLength > 0" @click="$emit('clear')" class="settings-icon-button text-red-600"
                         title="清空记录" aria-label="清空 Token 用量记录">
                         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -1850,7 +2081,7 @@
                     </button>
                 </settings-page-header>
 
-                <div class="mb-4 flex items-center gap-2">
+                <div class="usage-toolbar">
                     <div class="segmented-switch segmented-switch--compact segmented-switch--four min-w-0 flex-1">
                         <div class="segmented-switch__indicator" :class="filterOptions.find(option => option.value === filter)?.position"></div>
                         <button v-for="option in filterOptions" :key="option.value" type="button"
@@ -1859,24 +2090,21 @@
                     </div>
                     <div class="token-usage-time-filter-container relative flex-none">
                         <button type="button" @click="$emit('update:show-time-filter', !showTimeFilter)"
-                            class="flex h-10 w-10 items-center justify-center rounded-xl border shadow-sm transition-all active:scale-95"
-                            :class="timeFilter === 'all' ? 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700' : 'border-primary-200 bg-primary-50 text-primary-600'"
-                            :title="'时间范围：' + timeFilterLabel" aria-label="筛选 Token 记录时间范围" :aria-expanded="showTimeFilter">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16l-6 7v5l-4 2v-7L4 5z"></path>
+                            class="usage-range-button"
+                            aria-label="筛选 Token 记录时间范围" :aria-expanded="showTimeFilter">
+                            <svg fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true">
+                                <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path>
                             </svg>
+                            {{ timeFilterLabel }}
                         </button>
-                        <transition enter-active-class="transition duration-150 ease-out" enter-from-class="opacity-0 translate-y-1 scale-95"
-                            enter-to-class="opacity-100 translate-y-0 scale-100" leave-active-class="transition duration-100 ease-in"
-                            leave-from-class="opacity-100 translate-y-0 scale-100" leave-to-class="opacity-0 translate-y-1 scale-95">
-                            <div v-if="showTimeFilter" class="absolute right-0 top-full z-30 mt-2 w-36 origin-top-right rounded-xl border border-gray-200 bg-white p-1.5 shadow-xl ring-1 ring-black/5">
-                                <button v-for="option in timeFilterOptions" :key="option.value" type="button"
-                                    @click="$emit('update:time-filter', option.value); $emit('update:show-time-filter', false)"
-                                    class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-                                    :class="timeFilter === option.value ? 'bg-primary-50 text-primary-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'">
-                                    <span>{{ option.label }}</span>
-                                    <svg v-if="timeFilter === option.value" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        <transition name="dropdown">
+                            <div v-if="showTimeFilter" class="usage-range-menu" role="menu">
+                                <button v-for="option in timeFilterOptions" :key="option.value" type="button" role="menuitemradio"
+                                    :aria-checked="timeFilter === option.value" :class="{ 'is-active': timeFilter === option.value }"
+                                    @click="$emit('update:time-filter', option.value); $emit('update:show-time-filter', false)">
+                                    {{ option.label }}
+                                    <svg v-if="timeFilter === option.value" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M5 13l4 4L19 7"></path>
                                     </svg>
                                 </button>
                             </div>
@@ -1884,70 +2112,67 @@
                     </div>
                 </div>
 
-                <div class="relative mb-6 flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm">
-                    <div class="flex min-w-0 items-center text-sm font-semibold text-gray-500"><span>总用量</span>
-                        <settings-help topic="totalTokens" :open-topic="helpTopic" label="查看总用量说明" icon-class=""
-                            popover-class="token-usage-help-popover" @toggle="$emit('update:help-topic', $event)">
-                            汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
-                        </settings-help>
+                <section class="summary-card" aria-label="用量概览">
+                    <dl class="summary-facts">
+                        <div>
+                            <dt>
+                                总用量
+                                <settings-help topic="totalTokens" :open-topic="helpTopic" label="查看总用量说明" icon-class=""
+                                    @toggle="$emit('update:help-topic', $event)">
+                                    汇总当前类型和时间筛选范围内，输入 Token（包括缓存读取）与输出 Token 的总和。
+                                </settings-help>
+                            </dt>
+                            <dd>{{ formatAggregate(total, totalReports) }}<small>tokens</small></dd>
+                        </div>
+                        <div><dt>请求</dt><dd>{{ filteredCount }}<small>次</small></dd></div>
+                    </dl>
+                    <div class="usage-meter" aria-hidden="true">
+                        <span v-for="part in parts" :key="part.key" :class="'usage-tone--' + part.key" :style="{ flexGrow: part.value || 0 }"></span>
                     </div>
-                    <div class="flex-shrink-0 whitespace-nowrap font-mono text-xl font-bold tabular-nums text-gray-900">{{ formatAggregate(stats.inputTokens + stats.cacheReadTokens + stats.outputTokens, stats.inputTokensReports + stats.cacheReadTokensReports + stats.outputTokensReports) }}</div>
-                </div>
+                    <ul class="usage-legend">
+                        <li v-for="part in parts" :key="part.key">
+                            <i class="usage-swatch" :class="'usage-tone--' + part.key"></i>{{ part.label }}<b>{{ formatAggregate(part.value, part.reports) }}</b>
+                        </li>
+                    </ul>
+                </section>
 
-                <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-sm font-bold text-gray-700">请求日志</h3>
-                    <span class="text-[11px] text-gray-400">共 {{ filteredCount }} 条</span>
+                <div class="list-heading">
+                    <h3>请求日志</h3>
+                    <span>共 {{ filteredCount }} 条</span>
                 </div>
-                <div v-if="records.length > 0" class="space-y-3">
-                    <article v-for="record in records" :key="record.id"
-                        class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-gray-300">
-                        <div class="mb-3 min-w-0">
-                            <div class="flex min-w-0 items-center justify-between gap-3">
-                                <span class="min-w-0 flex-1 truncate text-sm text-gray-600" :title="record.model">{{ record.model || '未知模型' }}</span>
-                                 <span class="flex-shrink-0 text-sm font-semibold text-gray-500">{{ getTypeLabel(record.type) }}</span>
-                            </div>
-                            <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3">
-                                <div class="flex min-w-0 items-center gap-3 text-xs text-gray-400">
-                                    <span>耗时 {{ formatDuration(record.durationMs) }}</span>
-                                    <span v-if="record.isStream === true">速度 {{ formatOutputSpeed(record) }}</span>
+                <template v-if="records.length > 0">
+                    <ol class="list-card">
+                        <li v-for="record in records" :key="record.id" class="usage-row">
+                            <div class="usage-row__main">
+                                <div class="usage-row__model" :title="record.model">{{ record.model || '未知模型' }}</div>
+                                <div class="usage-row__meta">
+                                    <span class="usage-type" :class="'usage-type--' + getCategory(record.type)">{{ typeLabels[getCategory(record.type)] }}</span>
+                                    <time>{{ formatTime(record.timestamp) }}</time>
+                                    <span v-if="formatDuration(record.durationMs)">{{ formatDuration(record.durationMs) }}</span>
+                                    <span v-if="formatOutputSpeed(record)">{{ formatOutputSpeed(record) }}</span>
                                 </div>
-                                <time class="flex-shrink-0 text-xs text-gray-400">{{ formatTime(record.timestamp) }}</time>
                             </div>
-                        </div>
-                        <div class="space-y-1.5 rounded-xl border border-gray-100 bg-gray-50/60 px-3 py-2.5">
-                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                                    <span class="h-1.5 w-1.5 rounded-full bg-primary-500"></span>输入
-                                </span>
-                                <span class="flex min-w-0 items-center gap-1 font-mono">
-                                    <span class="text-sm font-bold text-gray-800">{{ formatCount(getUncachedInput(record)) }}</span>
-                                    <span v-if="Number(record.cacheReadTokens) > 0"
-                                        class="inline-flex min-w-0 items-center gap-0.5 text-sm font-bold text-gray-500/80"
-                                        title="缓存读取">
-                                        <svg class="h-4 w-4 flex-none" fill="none" stroke="currentColor" aria-hidden="true"><use href="#icon-arrow-down"></use></svg>
-                                        {{ formatCount(record.cacheReadTokens) }}
-                                    </span>
-                                </span>
-                            </div>
-                            <div class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                                    <span class="h-1.5 w-1.5 rounded-full bg-yellow-400"></span>输出
-                                </span>
-                                <span class="font-mono text-sm font-bold text-gray-800">{{ formatCount(record.outputTokens) }}</span>
-                            </div>
-                            <div v-if="Number.isFinite(record.actualQuota)" class="flex min-w-0 items-center justify-between gap-3 whitespace-nowrap">
-                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500">
-                                    <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span>消耗
-                                </span>
-                                <span class="font-mono text-sm font-bold text-gray-800" :title="record.usageGroup ? '计费分组：' + record.usageGroup : ''">{{ formatQuota(record.actualQuota) }}</span>
-                            </div>
-                        </div>
-                    </article>
-                    <pagination-controls :current="page" :total="pageCount" label="Token 记录分页" @change="$emit('update:page', $event)"></pagination-controls>
-                </div>
-                <div v-else class="rounded-2xl border border-dashed border-gray-200 bg-white/60 py-12 text-center">
-                    <div class="text-sm font-medium text-gray-500">{{ historyLength > 0 ? '当前分类还没有记录' : '还没有 Token 用量记录' }}</div>
-                    <div class="mt-1 text-xs text-gray-400">{{ historyLength > 0 ? '可以切换其他分类查看' : '完成一次 API 请求后会显示在这里' }}</div>
+                            <dl class="usage-row__stats">
+                                <div><dt><i class="usage-swatch usage-tone--input"></i>输入</dt><dd>{{ formatCount(getUncachedInput(record)) }}</dd></div>
+                                <div><dt><i class="usage-swatch usage-tone--cache"></i>缓存</dt><dd :class="{ 'is-empty': !(record.cacheReadTokens > 0) }">{{ record.cacheReadTokens > 0 ? formatCount(record.cacheReadTokens) : '—' }}</dd></div>
+                                <div><dt><i class="usage-swatch usage-tone--output"></i>输出</dt><dd>{{ formatCount(record.outputTokens) }}</dd></div>
+                                <div class="usage-row__stat-cost" :title="record.usageGroup ? '计费分组：' + record.usageGroup : ''">
+                                    <dt><i class="usage-swatch usage-tone--cost"></i>消耗</dt>
+                                    <dd :class="{ 'is-empty': !Number.isFinite(record.actualQuota) }">{{ Number.isFinite(record.actualQuota) ? formatQuota(record.actualQuota) : '—' }}</dd>
+                                </div>
+                            </dl>
+                            <span v-if="Number.isFinite(record.actualQuota)" class="usage-row__cost"
+                                :title="'本次消耗' + (record.usageGroup ? '，计费分组：' + record.usageGroup : '')">{{ formatQuota(record.actualQuota) }}</span>
+                        </li>
+                    </ol>
+                    <pagination-controls class="mt-4" :current="page" :total="pageCount" label="Token 记录分页" @change="$emit('update:page', $event)"></pagination-controls>
+                </template>
+                <div v-else class="empty-state">
+                    <svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 19V9m5 10V5m5 14v-7m5 7V3M3 21h18"></path>
+                    </svg>
+                    <p>{{ historyLength > 0 ? '当前筛选范围还没有记录' : '还没有 Token 用量记录' }}</p>
+                    <small>{{ historyLength > 0 ? '可以切换其他分类或时间范围查看' : '完成一次 API 请求后会显示在这里' }}</small>
                 </div>
             </div>`
     };
@@ -2086,7 +2311,7 @@
                                             <div class="relative flex items-center">
                                                 <label class="text-sm font-semibold text-gray-700">分析对话层数</label>
                                                 <settings-help topic="analysisDepth" :open-topic="helpTopic"
-                                                    label="查看分析对话层数说明" popover-class="is-above"
+                                                    label="查看分析对话层数说明"
                                                     @toggle="$emit('update:help-topic', $event)">
                                                     决定副模型分析时读取最近多少层对话。层数越多，能看到的剧情变化越完整，消耗越多；层数越少，消耗越少，但可能看不到较早发生的剧情
                                                 </settings-help>
@@ -2106,12 +2331,21 @@
                     </div>
                 </div>
 
-                <div v-if="!hasCharacter && templates.length === 0" class="py-24 text-center text-gray-400">请先选择角色卡</div>
-                <div v-else-if="templates.length === 0" class="py-24 text-center text-gray-400">当前没有UI模板</div>
-                <div v-else class="sortable-list">
+                <div v-if="templates.length === 0" class="empty-state">
+                    <svg fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm4 3h8M8 12h8M8 16h5"></path>
+                    </svg>
+                    <p>{{ hasCharacter ? '当前没有UI模板' : '请先选择角色卡' }}</p>
+                    <small>{{ hasCharacter ? '点右上角 + 新建模板，或导入 JSON' : '选择角色卡后可以为它添加专属模板' }}</small>
+                </div>
+                <div v-else class="sortable-list ui-template-list">
                     <div v-for="(template, index) in templates" :key="template.id"
-                        class="sortable-list-item">
+                        class="sortable-list-item" :class="{ 'is-off': template.enabled === false }">
                         <div class="sortable-item-main">
+                            <svg class="w-7 h-7 mr-3 flex-shrink-0 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm4 3h8M8 12h8M8 16h5"></path>
+                            </svg>
                             <div class="min-w-0">
                                 <div class="sortable-item-heading">
                                     <h3 class="truncate" :title="template.name">{{ template.name }}</h3>
@@ -2120,7 +2354,7 @@
                                         {{ template.scope === 'global' ? '全局' : '绑定' }}
                                     </span>
                                 </div>
-                                <p class="text-xs text-gray-500 mt-1">{{ Object.keys(template.variableState || {}).length }} 个变量 · {{ (template.changeLog || []).length }} 条记录</p>
+                                <p class="text-xs text-gray-500 mt-1 truncate">{{ template.placement === 'bottom' ? '对话底部' : '对话顶部' }} · {{ Object.keys(template.variableState || {}).length }} 个变量 · {{ (template.changeLog || []).length }} 次变更</p>
                             </div>
                         </div>
                         <div class="sortable-item-actions">
@@ -2163,11 +2397,8 @@
             'open-name-editor', 'delete-branch', 'close-name-editor', 'update:name-draft', 'save-name'
         ],
         template: `
-            <transition enter-active-class="transition-opacity duration-300 ease-out" enter-from-class="opacity-0"
-                enter-to-class="opacity-100" leave-active-class="transition-opacity duration-200 ease-in"
-                leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <modal-shell v-if="show" close-on-backdrop @close="$emit('close')"
-                    overlay-class="z-[120] bg-gray-900/40 backdrop-blur-sm p-4 sm:p-6"
+            <modal-shell :show="show" close-on-backdrop @close="$emit('close')"
+                overlay-class="z-[120] p-4 sm:p-6"
                     panel-class="w-full max-w-6xl h-[92vh] sm:h-[88vh] bg-white rounded-2xl shadow-2xl border border-gray-200/70 overflow-hidden flex flex-col">
                         <div class="px-5 sm:px-6 py-4 border-b border-gray-100 bg-white flex items-center justify-between flex-shrink-0">
                             <div class="min-w-0">
@@ -2184,7 +2415,7 @@
                                 </div>
                             </div>
                             <button @click="$emit('close')"
-                                class="w-9 h-9 rounded-full bg-gray-50 hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors flex-shrink-0">
+                                class="w-9 h-9 rounded-full hover:bg-red-50 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors flex-shrink-0">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
@@ -2241,14 +2472,10 @@
                                     class="story-route-delete-button">删除</button>
                             </div>
                         </div>
-                </modal-shell>
-            </transition>
+            </modal-shell>
 
-            <transition enter-active-class="transition-opacity duration-200" enter-from-class="opacity-0"
-                enter-to-class="opacity-100" leave-active-class="transition-opacity duration-150"
-                leave-from-class="opacity-100" leave-to-class="opacity-0">
-                <modal-shell v-if="showNameEditor" close-on-backdrop @close="$emit('close-name-editor')"
-                    overlay-class="z-[180] bg-gray-900/40 backdrop-blur-sm p-4"
+            <modal-shell :show="showNameEditor" close-on-backdrop @close="$emit('close-name-editor')"
+                overlay-class="z-[180] p-4"
                     panel-class="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
                         <h3 class="text-lg font-bold text-gray-800">编辑分支名称</h3>
                         <p class="mt-1 text-sm text-gray-500">名称最多 30 个字。</p>
@@ -2263,8 +2490,7 @@
                             <button @click="$emit('save-name')" :disabled="switching"
                                 class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">保存</button>
                         </div>
-                </modal-shell>
-            </transition>`
+            </modal-shell>`
     };
 
     const CharacterCard = {
@@ -2348,7 +2574,7 @@
                 </div>
                 <template v-if="mobile">
                     <div v-if="deck" class="character-deck__placeholder" aria-hidden="true">{{ (char.name || '角').slice(0, 1) }}</div>
-                    <img v-if="!deck || char?.avatar" :src="char?.avatar" :alt="char.name" draggable="false"
+                    <img v-if="!deck || char.avatar" :src="char.avatar" :alt="char.name" draggable="false"
                         class="absolute inset-0 w-full h-full object-cover" :loading="deck ? 'eager' : 'lazy'" decoding="async">
                     <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent"></div>
 
@@ -2368,7 +2594,7 @@
                         </div>
                     </div>
 
-                    <div v-if="!batchMode" class="absolute top-3 right-3 flex flex-col gap-2 z-20">
+                    <div v-if="!batchMode" class="character-card-actions absolute top-3 right-3 flex flex-col gap-2 z-20">
                         <button @click.stop="$emit('edit')"
                             title="编辑角色" aria-label="编辑角色"
                             class="p-2 bg-white/20 backdrop-blur-md text-white rounded-full border border-white/20 active:bg-white/40 shadow-lg">
@@ -2408,7 +2634,7 @@
 
                 <template v-else>
                     <div class="aspect-w-2 aspect-h-3 relative h-[500px] overflow-hidden">
-                        <img :src="char?.avatar" class="character-card-cover w-full h-full object-cover" loading="lazy" decoding="async">
+                        <img :src="char.avatar" class="character-card-cover w-full h-full object-cover" loading="lazy" decoding="async">
                         <div class="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity"></div>
 
                         <div v-if="active && !batchMode" class="absolute top-4 left-4 z-10">
@@ -2418,7 +2644,7 @@
                             </div>
                         </div>
 
-                        <div v-if="!batchMode" class="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div v-if="!batchMode" class="character-card-actions absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                             <button @click.stop="$emit('edit')" class="p-2 bg-white/90 backdrop-blur-sm text-gray-700 hover:text-primary-600 rounded-full shadow-lg transition-all hover:scale-110" title="编辑角色">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
@@ -2492,31 +2718,44 @@
             const focused = computed(() => props.items[focusedIndex.value]);
             const buttonColors = ref(null);
             watch(() => focused.value?.char.avatar, avatar => { if (!avatar) buttonColors.value = null; });
+            // 读取失败（跨域封面）时抛错，由调用方决定退路。
+            const readButtonColors = image => {
+                const canvas = document.createElement('canvas');
+                canvas.width = canvas.height = 12;
+                const context = canvas.getContext('2d', { willReadFrequently: true });
+                context.drawImage(image, 0, 0, 12, 12);
+                const pixels = context.getImageData(0, 0, 12, 12).data;
+                const rgb = [0, 0, 0];
+                let weight = 0;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const alpha = pixels[i + 3] / 255;
+                    weight += alpha;
+                    rgb.forEach((_, channel) => { rgb[channel] += pixels[i + channel] * alpha; });
+                }
+                if (!weight) return null;
+                const color = rgb.map(value => Math.round(value / weight));
+                const linear = color.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+                const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+                return { '--deck-button-bg': `rgb(${color.join(',')})`, '--deck-button-text': luminance > 0.45 ? '#000' : '#fff' };
+            };
             const syncButtonColors = event => {
                 const image = event.currentTarget;
-                if (image.getAttribute('src') !== focused.value?.char.avatar) return;
+                const src = image.getAttribute('src');
+                if (src !== focused.value?.char.avatar) return;
                 buttonColors.value = null;
                 if (event.type === 'error') return;
                 try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = canvas.height = 12;
-                    const context = canvas.getContext('2d', { willReadFrequently: true });
-                    context.drawImage(image, 0, 0, 12, 12);
-                    const pixels = context.getImageData(0, 0, 12, 12).data;
-                    const rgb = [0, 0, 0];
-                    let weight = 0;
-                    for (let i = 0; i < pixels.length; i += 4) {
-                        const alpha = pixels[i + 3] / 255;
-                        weight += alpha;
-                        rgb.forEach((_, channel) => { rgb[channel] += pixels[i + channel] * alpha; });
-                    }
-                    if (!weight) return;
-                    const color = rgb.map(value => Math.round(value / weight));
-                    const linear = color.map(value => value / 255).map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
-                    const luminance = linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
-                    buttonColors.value = { '--deck-button-bg': `rgb(${color.join(',')})`, '--deck-button-text': luminance > 0.45 ? '#000' : '#fff' };
+                    buttonColors.value = readButtonColors(image);
                 } catch {
-                    // 跨域封面无法取色时使用默认配色，不影响封面显示或切换。
+                    // 工坊一键导入等跨域封面不能直接取色：允许跨域读取的图床再匿名读一次（通常直接命中缓存），
+                    // 仍不允许时保留默认配色，不影响封面显示或切换。
+                    const probe = new Image();
+                    probe.crossOrigin = 'anonymous';
+                    probe.onload = () => {
+                        if (src !== focused.value?.char.avatar) return;
+                        try { buttonColors.value = readButtonColors(probe); } catch { /* 图床不允许跨域读取 */ }
+                    };
+                    probe.src = src;
                 }
             };
             watch(() => props.items.map(item => item.char.uuid), (ids, previous = []) => {
@@ -2528,23 +2767,17 @@
                 if (props.items.some(item => item.char.uuid === id)) focusedId.value = id;
             });
             // 最多渲染中间与左右各两张，收藏排序或筛选改变时仍跟随同一个角色。
-            const leftCount = computed(() => Math.min(2, Math.floor((props.items.length - (dragOffset.value > 0 ? 0 : 1)) / 2)));
-            // Counts depend on card data and window membership, never pointer position.
-            const windowItems = computed(() => {
+            const visibleItems = computed(() => {
                 const count = props.items.length;
                 const result = [];
-                for (let offset = -leftCount.value; offset <= Math.min(2, count - leftCount.value - 1); offset++) {
-                    if (!count) break;
+                const leftCount = Math.min(2, Math.floor((count - (dragOffset.value > 0 ? 0 : 1)) / 2));
+                for (let offset = -leftCount; offset <= Math.min(2, count - leftCount - 1); offset++) {
                     const index = (focusedIndex.value + offset + count) % count;
-                    const item = props.items[index];
-                    result.push({ ...item, offset, worldInfoCount: props.worldInfoCount(item.char), regexCount: props.regexCount(item.char) });
+                    const position = offset + dragOffset.value;
+                    result.push({ ...props.items[index], offset, position, depth: Math.abs(position) });
                 }
                 return result;
             });
-            const visibleItems = computed(() => windowItems.value.map(item => {
-                const position = item.offset + dragOffset.value;
-                return { ...item, position, depth: Math.abs(position) };
-            }));
             const move = direction => {
                 if (busy.value || props.items.length < 2) return;
                 opening.value = false;
@@ -2670,7 +2903,7 @@
                             :style="{ '--deck-offset': item.position, '--deck-depth': item.depth, zIndex: 100 - Math.round(item.depth * 10) }">
                             <character-card :char="item.char" mobile deck :active="activeId === item.char.uuid"
                                 :loading="loadingIndex === item.originalIndex" :favorite="Number(item.char.favoriteAt) > 0"
-                                :world-info-count="item.worldInfoCount" :regex-count="item.regexCount"
+                                :world-info-count="worldInfoCount(item.char)" :regex-count="regexCount(item.char)"
                                 :inert="item.offset !== 0" :aria-hidden="item.offset !== 0"
                                 @edit="$emit('edit', item.originalIndex)" @export-card="$emit('export-card', item.originalIndex)"
                                 @toggle-favorite="$emit('toggle-favorite', item.originalIndex)" @delete-card="$emit('delete-card', item.originalIndex)">
@@ -2715,9 +2948,12 @@
         PresetEditorModal,
         RegexEditorModal,
         RetryConfirmModal,
+        SecretInput,
+        StatusNoticeModal,
         SettingsHelp,
         SettingsPageHeader,
-        StatusNoticeModal,
+        MemoryBackfillModal,
+        MemoryCitationModal,
         StoryBranchModal,
         TokenUsageView,
         UiTemplatesView,
