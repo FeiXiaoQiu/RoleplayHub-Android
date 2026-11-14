@@ -5,7 +5,10 @@ const { performance } = require('node:perf_hooks');
 const { test } = require('node:test');
 const root = require('node:path').resolve(__dirname, '..');
 const source = fs.readFileSync(`${root}/assets/js/app.js`, 'utf8');
-const context = vm.createContext({ window: {}, console, Vue: {} });
+const context = vm.createContext({
+    window: {}, console, Vue: {},
+    TextDecoder, TextEncoder, setTimeout, clearTimeout, crypto: globalThis.crypto
+});
 for (const file of ['built-in-content.js', 'core-utils.js', 'data-services.js']) {
     vm.runInContext(fs.readFileSync(`${root}/assets/js/${file}`, 'utf8'), context);
 }

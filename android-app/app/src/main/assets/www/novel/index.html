@@ -2775,6 +2775,21 @@ ${charPrompt}
                     nextTick(() => updateTabSlider());
                 });
 
+                // Android 返回键：先逐层关闭本页弹层，未处理时再由外层接管
+                window.RPHubBack = () => {
+                    if (showConfirmModal.value) {
+                        cancelConfirm();
+                        return true;
+                    }
+                    for (const overlay of [showApiProviderSelect, showWordCountSelect, showGenerateCountSelect, showReviewModal, showImportExportModal, showSettings, mobileSidebarOpen]) {
+                        if (overlay.value) {
+                            overlay.value = false;
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
                 return {
                     showSettings, isGenerating, isLoadingModels, mobileSidebarOpen, showImportExportModal,
                     showReviewModal, isReviewing, hasReviewed, reviews, reviewStatus, currentReviewTab, reviewTabs,

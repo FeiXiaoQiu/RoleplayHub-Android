@@ -115,7 +115,7 @@ test('real editor switch and chat slot handlers keep bindings independent', asyn
 });
 
 test('Android bundled resources match root web resources', () => {
-    for (const file of ['index.html', 'assets/js/app.js', 'assets/js/api-utils.js', 'assets/js/ui-components.js']) {
+    for (const file of ['index.html', 'assets/js/app.js', 'assets/js/api-utils.js', 'assets/js/ui-components.js', 'assets/js/native-bridge.js', 'assets/js/core-utils.js', 'assets/js/data-services.js', 'assets/css/styles.css', 'character/index.html', 'novel/index.html']) {
         assert.equal(fs.readFileSync(path.join(root, file), 'utf8'),
             fs.readFileSync(path.join(root, 'android-app/app/src/main/assets/www', file), 'utf8'), file);
     }

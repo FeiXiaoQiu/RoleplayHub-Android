@@ -2629,3 +2629,14 @@ button.sortable-item-main:focus-visible { outline: 2px solid rgb(var(--primary-4
 :root[data-app-font="modern"] { --font-sans: var(--app-font-modern); }
 :root[data-app-font="system"] { --font-sans: var(--app-font-system); }
 :root[data-app-font="serif"] { --font-sans: var(--app-font-serif); }
+
+/* --- Fork: 尊重系统“减少动态效果”设置 --- */
+@media (prefers-reduced-motion: reduce) {
+    .modal-shell, .modal-shell *, .character-deck *,
+    .animate-message-in, .animate-message-fade-in, .typing-indicator span {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        transition-delay: 0s !important;
+    }
+}
