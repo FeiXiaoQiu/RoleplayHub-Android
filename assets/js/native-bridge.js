@@ -63,6 +63,12 @@
         request.onerror = () => reject(request.error || new Error('写入数据库失败'));
     });
 
+    const idbGet = (db, key) => new Promise((resolve, reject) => {
+        const request = db.transaction([STORE_NAME], 'readonly').objectStore(STORE_NAME).get(key);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error || new Error('读取数据库失败'));
+    });
+
     const deepClone = (value) => {
         if (typeof structuredClone === 'function') {
             try { return structuredClone(value); } catch (_) { /* fall through */ }
@@ -166,6 +172,42 @@
         });
     };
 
+    // API 密钥一类的字段永不写入备份文件；恢复时会保留本机已有的密钥。
+    const SECRET_FIELD_PATTERN = /^(apiProviderKeys|apiKeys)$|(api_?key|secret|password|credential|auth_?token|access_?token|_token)$/i;
+
+    const stripSecretFields = (value, depth = 0) => {
+        if (!value || typeof value !== 'object' || depth > 8) return value;
+        if (Array.isArray(value)) {
+            value.forEach(item => stripSecretFields(item, depth + 1));
+            return value;
+        }
+        Object.keys(value).forEach(key => {
+            if (SECRET_FIELD_PATTERN.test(key)) {
+                delete value[key];
+            } else {
+                stripSecretFields(value[key], depth + 1);
+            }
+        });
+        return value;
+    };
+
+    const mergeSecretFields = (incoming, existing, depth = 0) => {
+        if (!incoming || !existing || typeof incoming !== 'object' || typeof existing !== 'object' || depth > 8) return;
+        if (Array.isArray(incoming) || Array.isArray(existing)) {
+            if (Array.isArray(incoming) && Array.isArray(existing)) {
+                incoming.forEach((item, index) => mergeSecretFields(item, existing[index], depth + 1));
+            }
+            return;
+        }
+        Object.keys(existing).forEach(key => {
+            if (SECRET_FIELD_PATTERN.test(key)) {
+                if (!(key in incoming)) incoming[key] = existing[key];
+            } else {
+                mergeSecretFields(incoming[key], existing[key], depth + 1);
+            }
+        });
+    };
+
     const buildReadableFiles = (entries, stripImages) => {
         const encoder = new TextEncoder();
         const files = [];
@@ -250,15 +292,17 @@
             let clone;
             try { clone = deepClone(byKey.get(key)); } catch (_) { clone = byKey.get(key); }
             stripInlineImages(clone);
+            if (key === 'rp_hub_settings') stripSecretFields(clone);
             pushText(path, JSON.stringify(clone ?? null, null, 2));
         });
 
-        // 原始数据：完整、无损，供 App 恢复使用
+        // 原始数据：完整、无损，供 App 恢复使用（API 密钥始终剔除）
         entries.forEach(entry => {
             let value = entry.value;
-            if (stripImages) {
+            if (stripImages || entry.key === 'rp_hub_settings') {
                 value = deepClone(value);
-                stripImagesDeep(value);
+                if (stripImages) stripImagesDeep(value);
+                if (entry.key === 'rp_hub_settings') stripSecretFields(value);
             }
             pushText('原始数据/' + entry.key + '.json', JSON.stringify(value ?? null));
         });
@@ -285,7 +329,8 @@
         '恢复只读取「原始数据」目录；角色卡和聊天记录是给你看的，不参与恢复。',
         '图片、头像等二进制内容只保留在「原始数据」里，可读目录中用占位文字代替。',
         '',
-        '注意：「设置/设置.json」里含有 API 密钥等敏感信息，分享前请先删掉。',
+        'API 密钥（apiKey、各提供商密钥、Tavily 密钥等）不会写进备份文件；',
+        '恢复备份时也不会覆盖本机已保存的密钥，密钥只留在本机。',
         ''
     ].join('\n');
 
@@ -402,7 +447,14 @@
                         localKey = decodeURIComponent(path.slice(6).replace(/\.json$/, ''));
                     }
                     if (idbKey && idbKey.startsWith('rp_hub_')) {
-                        await idbPut(db, idbKey, JSON.parse(text));
+                        if (idbKey === 'rp_hub_settings') {
+                            const incoming = JSON.parse(text);
+                            const existing = await idbGet(db, 'rp_hub_settings');
+                            mergeSecretFields(incoming, existing);
+                            await idbPut(db, idbKey, incoming);
+                        } else {
+                            await idbPut(db, idbKey, JSON.parse(text));
+                        }
                         restored++;
                     } else if (localKey) {
                         const parsed = JSON.parse(text);
