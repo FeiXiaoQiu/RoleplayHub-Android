@@ -897,7 +897,7 @@ window.RPHubUtils = {
         img.src = src;
     });
 
-    const downloadBlob = (blob, filename, options = {}) => {
+    const triggerBlobDownload = (blob, filename, options) => {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -917,6 +917,27 @@ window.RPHubUtils = {
         } else {
             cleanup();
         }
+    };
+
+    const downloadBlob = (blob, filename, options = {}) => {
+        const native = window.RoleplayHubNative;
+        if (native && typeof native.saveFile === 'function' && typeof FileReader !== 'undefined') {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                try {
+                    const result = String(reader.result || '');
+                    const comma = result.indexOf(',');
+                    if (comma < 0) throw new Error('读取文件数据失败');
+                    native.saveFile(result.slice(comma + 1), filename, blob.type || 'application/octet-stream');
+                } catch (_) {
+                    triggerBlobDownload(blob, filename, options);
+                }
+            };
+            reader.onerror = () => triggerBlobDownload(blob, filename, options);
+            reader.readAsDataURL(blob);
+            return;
+        }
+        triggerBlobDownload(blob, filename, options);
     };
 
     window.RPHubCardUtils = {
